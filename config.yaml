@@ -1,0 +1,28 @@
+# API Keys and Secrets
+twitter:
+  consumer_key: ""
+  consumer_secret: ""
+  access_token: ""
+  access_token_secret: ""
+
+openai:
+  api_key: ""
+
+# Application Settings
+app:
+  debug: true
+  host: "0.0.0.0"
+  port: 5000
+
+# Paths
+paths:
+  templates: "data/imgflip_templates.json"
+  sample_memes: "data/sample_memes/"
+  static: "webapp/static/"
+
+# AI Settings
+ai:
+  caption_model: "gpt-4"
+  image_model: "blip"
+  max_tokens: 100
+  temperature: 0.7 
