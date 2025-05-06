@@ -14,10 +14,14 @@ A powerful meme generation platform with both Twitter bot and web interface capa
 
 ```
 memezap/
-├── bot/                    # Twitter bot (V1)
+├── bot/                    # Twitter bot and API server
+│   ├── routes.py           # API routes
+│   └── twitter_bot.py      # Twitter bot implementation
 ├── webapp/                 # Web interface for meme creation
 ├── ai_services/            # AI + ML related components
 ├── data/                   # Meme templates and examples
+│   ├── user_query_meme/    # Original images uploaded by users
+│   └── user_response_meme/ # Generated memes
 ├── scripts/                # Utility or setup scripts
 └── tests/                  # Unit & integration tests
 ```
@@ -53,6 +57,9 @@ memezap/
      
      # For just the web interface
      python webapp/app.py
+     
+     # For the Twitter bot
+     python bot/twitter_bot.py
      ```
 
 ## Environment Variables
@@ -65,6 +72,7 @@ TWITTER_CONSUMER_KEY=your_twitter_consumer_key
 TWITTER_CONSUMER_SECRET=your_twitter_consumer_secret
 TWITTER_ACCESS_TOKEN=your_twitter_access_token
 TWITTER_ACCESS_TOKEN_SECRET=your_twitter_access_token_secret
+TWITTER_BEARER_TOKEN=your_twitter_bearer_token
 
 # OpenAI API Key
 OPENAI_API_KEY=your_openai_api_key
@@ -112,6 +120,16 @@ The web interface runs on port 8000 by default and provides a user-friendly inte
 # or
 python webapp/app.py
 ```
+
+### Twitter Bot
+
+The Twitter bot monitors mentions and automatically generates memes from attached images.
+
+```bash
+python bot/twitter_bot.py
+```
+
+For more details about the Twitter bot setup and usage, see [Twitter Bot README](bot/README_TWITTER_BOT.md).
 
 ## AWS S3 Configuration
 
