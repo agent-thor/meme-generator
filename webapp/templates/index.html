@@ -1,127 +1,118 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Meme Generator</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        .meme-container {
-            max-width: 500px;
-            margin: 0 auto;
-        }
-        .meme-preview {
-            max-width: 100%;
-            margin: 20px 0;
-        }
-        .loading {
-            display: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="container mt-5">
-        <h1 class="text-center mb-4">Meme Generator</h1>
-        
-        <div class="meme-container">
-            <form id="memeForm" enctype="multipart/form-data">
-                <div class="mb-3">
-                    <label for="image" class="form-label">Upload Image</label>
-                    <input type="file" class="form-control" id="image" name="image" accept="image/*" required>
-                </div>
-                
-                <div class="mb-3">
-                    <label for="caption" class="form-label">Caption (Optional)</label>
-                    <input type="text" class="form-control" id="caption" name="caption" placeholder="Enter your caption or let AI generate one">
-                </div>
-                
-                <div class="text-center">
-                    <button type="submit" class="btn btn-primary">Generate Meme</button>
-                </div>
-            </form>
-            
-            <div class="loading text-center mt-3">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-                <p class="mt-2">Generating your meme...</p>
+{% extends "base.html" %}
+
+{% block title %}Meme Generator - Home{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-md-6 offset-md-3 text-center mb-5">
+        <h1 class="display-4 mb-4">Welcome to Meme Generator</h1>
+        <p class="lead">Create hilarious memes with our powerful meme generation engine!</p>
+    </div>
+</div>
+
+{% if last_meme_url %}
+<div class="row mb-5">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h2 class="card-title h5 mb-0">Your Generated Meme</h2>
             </div>
-            
-            <div id="memePreview" class="text-center">
-                <img id="previewImage" class="meme-preview" style="display: none;">
-                <div id="previewCaption" class="mt-2"></div>
+            <div class="card-body text-center">
+                <img src="{{ last_meme_url }}" alt="Generated Meme" class="img-fluid rounded shadow" style="max-height: 400px;">
+                <div class="mt-3">
+                    <a href="{{ last_meme_url }}" class="btn btn-sm btn-outline-primary" target="_blank">View Full Size</a>
+                    <a href="{{ last_meme_url }}" class="btn btn-sm btn-outline-secondary" download="meme.jpg">Download</a>
+                </div>
             </div>
         </div>
     </div>
+</div>
+{% endif %}
 
-    <script>
-        document.getElementById('memeForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const form = e.target;
-            const loading = document.querySelector('.loading');
-            const previewImage = document.getElementById('previewImage');
-            const previewCaption = document.getElementById('previewCaption');
-            
-            // Show loading
-            loading.style.display = 'block';
-            previewImage.style.display = 'none';
-            previewCaption.textContent = '';
-            
-            try {
-                const formData = new FormData(form);
-                
-                // First, generate caption if not provided
-                if (!formData.get('caption')) {
-                    const captionResponse = await fetch('/api/caption', {
-                        method: 'POST',
-                        body: formData
-                    });
+<div class="row">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header bg-primary text-white">
+                <h2 class="card-title h5 mb-0">Create a Meme</h2>
+            </div>
+            <div class="card-body">
+                <form method="POST" enctype="multipart/form-data">
+                    {{ form.csrf_token }}
                     
-                    if (!captionResponse.ok) throw new Error('Failed to generate caption');
+                    <div class="mb-3">
+                        {{ form.image.label(class="form-label") }}
+                        {{ form.image(class="form-control") }}
+                        {% if form.image.errors %}
+                            <div class="alert alert-danger mt-2">
+                                {% for error in form.image.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
                     
-                    const { caption } = await captionResponse.json();
-                    formData.set('caption', caption);
-                    previewCaption.textContent = caption;
-                }
-                
-                // Generate meme
-                const response = await fetch('/api/generate', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) throw new Error('Failed to generate meme');
-                
-                // Create object URL for the image
-                const blob = await response.blob();
-                const objectUrl = URL.createObjectURL(blob);
-                
-                // Display the meme
-                previewImage.src = objectUrl;
-                previewImage.style.display = 'block';
-                
-            } catch (error) {
-                console.error('Error:', error);
-                alert('Failed to generate meme. Please try again.');
-            } finally {
-                loading.style.display = 'none';
-            }
-        });
-        
-        // Preview uploaded image
-        document.getElementById('image').addEventListener('change', (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const previewImage = document.getElementById('previewImage');
-                    previewImage.src = e.target.result;
-                    previewImage.style.display = 'block';
-                };
-                reader.readAsDataURL(file);
-            }
-        });
-    </script>
-</body>
-</html> 
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                {{ form.top_text.label(class="form-label") }}
+                                {{ form.top_text(class="form-control") }}
+                                {% if form.top_text.errors %}
+                                    <div class="alert alert-danger mt-2">
+                                        {% for error in form.top_text.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                {{ form.bottom_text.label(class="form-label") }}
+                                {{ form.bottom_text(class="form-control") }}
+                                {% if form.bottom_text.errors %}
+                                    <div class="alert alert-danger mt-2">
+                                        {% for error in form.bottom_text.errors %}
+                                            {{ error }}
+                                        {% endfor %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.additional_text.label(class="form-label") }}
+                        {{ form.additional_text(class="form-control", rows=3) }}
+                        <div class="form-text">{{ form.additional_text.description }}</div>
+                        {% if form.additional_text.errors %}
+                            <div class="alert alert-danger mt-2">
+                                {% for error in form.additional_text.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="d-grid">
+                        {{ form.submit(class="btn btn-primary btn-lg") }}
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-5">
+    <div class="col-md-8 offset-md-2">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <h2 class="card-title h5 mb-0">Try our Chat Interface</h2>
+            </div>
+            <div class="card-body">
+                <p>Prefer a conversational approach? Try our chat interface for a more interactive experience.</p>
+                <a href="{{ url_for('main.chat') }}" class="btn btn-secondary">Go to Chat</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

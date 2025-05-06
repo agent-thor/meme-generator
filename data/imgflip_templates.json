@@ -1,0 +1,32 @@
+{
+  "drake": {
+    "id": "drake",
+    "name": "Drake Hotline Bling",
+    "top_text": "Reading documentation",
+    "bottom_text": "Asking ChatGPT"
+  },
+  "distracted": {
+    "id": "distracted",
+    "name": "Distracted Boyfriend",
+    "top_text": "New JavaScript Framework",
+    "bottom_text": "Developers with existing projects"
+  },
+  "change_my_mind": {
+    "id": "change_my_mind",
+    "name": "Change My Mind",
+    "top_text": "Python is the best programming language",
+    "bottom_text": "Change my mind"
+  },
+  "two_buttons": {
+    "id": "two_buttons",
+    "name": "Two Buttons",
+    "top_text": "Write clean code",
+    "bottom_text": "Just make it work"
+  },
+  "hide_the_pain": {
+    "id": "hide_the_pain",
+    "name": "Hide the Pain Harold",
+    "top_text": "When your code works",
+    "bottom_text": "But you don't know why"
+  }
+} 

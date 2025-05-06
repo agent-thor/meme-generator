@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+
+{% block title %}Meme Generator - Chat{% endblock %}
+
+{% block extra_css %}
+<style>
+    .chat-container {
+        height: 65vh; /* Adjust as needed */
+        overflow-y: auto;
+        border: 1px solid #dee2e6;
+        border-radius: 0.25rem;
+        padding: 1rem;
+        background-color: #f8f9fa;
+    }
+    
+    .chat-message {
+        margin-bottom: 1rem;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+        max-width: 80%;
+    }
+    
+    .user-message {
+        background-color: #d1ecf1;
+        color: #0c5460;
+        margin-left: auto;
+    }
+    
+    .bot-message {
+        background-color: #f8f9fa;
+        color: #212529;
+        border: 1px solid #dee2e6;
+    }
+    
+    .message-image {
+        max-width: 100%;
+        height: auto;
+        border-radius: 0.25rem;
+        margin-top: 0.5rem;
+    }
+    
+    .message-time {
+        font-size: 0.75rem;
+        color: #6c757d;
+        text-align: right;
+        margin-top: 0.25rem;
+    }
+    
+    #messageForm {
+        position: sticky;
+        bottom: 0;
+        background-color: white;
+        padding-top: 1rem;
+        border-top: 1px solid #dee2e6;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col">
+        <h1 class="h3">Meme Chat</h1>
+        <p class="text-muted">Upload an image and add text to generate a meme</p>
+    </div>
+    <div class="col-auto">
+        <form method="POST" action="{{ url_for('main.clear_chat') }}">
+            <button type="submit" class="btn btn-outline-danger">
+                <i class="fas fa-trash-alt"></i> Clear Chat
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="chat-container mb-3" id="chatContainer">
+    {% if chat_history %}
+        {% for message in chat_history %}
+            <div class="chat-message {% if message.user %}user-message{% else %}bot-message{% endif %}">
+                <div class="message-content">{{ message.text }}</div>
+                {% if message.image %}
+                    <img src="{{ message.image }}" alt="Shared image" class="message-image">
+                {% endif %}
+                <div class="message-time">{{ message.timestamp }}</div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="text-center text-muted py-5">
+            <i class="fas fa-comments fa-3x mb-3"></i>
+            <p>No messages yet. Start the conversation!</p>
+        </div>
+    {% endif %}
+</div>
+
+<form method="POST" enctype="multipart/form-data" id="messageForm">
+    {{ form.csrf_token }}
+    
+    <div class="card">
+        <div class="card-body">
+            <div class="mb-3">
+                {{ form.message.label(class="form-label") }}
+                {{ form.message(class="form-control", rows=2, placeholder="Type your message here...") }}
+                {% if form.message.errors %}
+                    <div class="alert alert-danger mt-2">
+                        {% for error in form.message.errors %}
+                            {{ error }}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            
+            <div class="mb-3">
+                {{ form.image.label(class="form-label") }}
+                <div class="input-group">
+                    {{ form.image(class="form-control") }}
+                    <span class="input-group-text">
+                        <i class="fas fa-image"></i>
+                    </span>
+                </div>
+                {% if form.image.errors %}
+                    <div class="alert alert-danger mt-2">
+                        {% for error in form.image.errors %}
+                            {{ error }}
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            
+            <div class="d-grid">
+                {{ form.submit(class="btn btn-primary") }}
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Scroll chat to bottom when page loads
+    document.addEventListener('DOMContentLoaded', function() {
+        const chatContainer = document.getElementById('chatContainer');
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    });
+    
+    // Preview image before upload
+    document.querySelector('#image').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file && file.type.match('image.*')) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // You could add image preview here if desired
+                console.log("Image selected:", file.name);
+            }
+            reader.readAsDataURL(file);
+        }
+    });
+</script>
+{% endblock %} 

@@ -1,18 +1,25 @@
 # API Keys and Secrets
+# Values are loaded from environment variables
 twitter:
-  consumer_key: ""
-  consumer_secret: ""
-  access_token: ""
-  access_token_secret: ""
+  consumer_key: ${TWITTER_CONSUMER_KEY}
+  consumer_secret: ${TWITTER_CONSUMER_SECRET}
+  access_token: ${TWITTER_ACCESS_TOKEN}
+  access_token_secret: ${TWITTER_ACCESS_TOKEN_SECRET}
 
 openai:
-  api_key: ""
+  api_key: ${OPENAI_API_KEY}
+
+aws:
+  access_key_id: ${AWS_ACCESS_KEY_ID}
+  secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+  region_name: ${AWS_REGION_NAME}
+  s3_bucket: ${AWS_S3_BUCKET}
 
 # Application Settings
 app:
-  debug: true
-  host: "0.0.0.0"
-  port: 5000
+  debug: ${APP_DEBUG}
+  host: ${APP_HOST}
+  port: ${APP_PORT}
 
 # Paths
 paths:
@@ -22,7 +29,7 @@ paths:
 
 # AI Settings
 ai:
-  caption_model: "gpt-4"
-  image_model: "blip"
-  max_tokens: 100
-  temperature: 0.7 
+  caption_model: ${AI_CAPTION_MODEL}
+  image_model: ${AI_IMAGE_MODEL}
+  max_tokens: ${AI_MAX_TOKENS}
+  temperature: ${AI_TEMPERATURE} 

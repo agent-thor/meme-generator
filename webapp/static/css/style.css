@@ -1,0 +1,82 @@
+/* 
+   Main Stylesheet for Meme Generator
+*/
+
+/* General Styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f5f5f5;
+    color: #333;
+}
+
+/* Header/Navbar */
+.navbar-brand {
+    font-weight: bold;
+    font-size: 1.4rem;
+}
+
+/* Footer */
+footer {
+    margin-top: 3rem;
+}
+
+/* Card Styles */
+.card {
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-3px);
+}
+
+.card-header h2 {
+    margin-bottom: 0;
+}
+
+/* Form Controls */
+.form-control:focus {
+    border-color: #80bdff;
+    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+/* Image Preview */
+.image-preview {
+    width: 100%;
+    max-height: 300px;
+    object-fit: contain;
+    margin-top: 1rem;
+    border-radius: 0.25rem;
+    border: 1px solid #dee2e6;
+}
+
+/* Chat-specific styles */
+.message-bubble {
+    border-radius: 20px;
+    padding: 10px 15px;
+    margin-bottom: 10px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: #4a6cf7;
+    border-color: #4a6cf7;
+}
+
+.btn-primary:hover {
+    background-color: #3a5de6;
+    border-color: #3a5de6;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .chat-container {
+        height: 50vh;
+    }
+    
+    .card {
+        margin-bottom: 1rem;
+    }
+} 
