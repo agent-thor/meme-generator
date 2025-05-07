@@ -178,6 +178,92 @@ class MemeService:
             logger.error(f"Error generating meme: {e}")
             raise
     
+    def fill_with_neighbor_pixels(self, image, x_min, y_min, x_max, y_max, patch_size=5):
+        """
+        Fill a region with patches sampled from its borders.
+        
+        Args:
+            image: Input image
+            x_min, y_min, x_max, y_max: Region coordinates
+            patch_size: Size of patches to sample
+            
+        Returns:
+            Image with region filled using border patches
+        """
+        region = image.copy()
+        
+        # Extract border patches
+        border_patches = []
+        
+        # Top border
+        if y_min - patch_size >= 0:
+            top_patch = image[y_min-patch_size:y_min, x_min:x_max]
+            if top_patch.size > 0:
+                border_patches.append(top_patch)
+        
+        # Bottom border
+        if y_max + patch_size < image.shape[0]:
+            bottom_patch = image[y_max:y_max+patch_size, x_min:x_max]
+            if bottom_patch.size > 0:
+                border_patches.append(bottom_patch)
+        
+        # Left border
+        if x_min - patch_size >= 0:
+            left_patch = image[y_min:y_max, x_min-patch_size:x_min]
+            if left_patch.size > 0:
+                # Reshape to match width of other patches
+                left_patch = np.repeat(left_patch, (x_max - x_min) // left_patch.shape[1] + 1, axis=1)
+                left_patch = left_patch[:, :(x_max - x_min)]
+                border_patches.append(left_patch)
+        
+        # Right border
+        if x_max + patch_size < image.shape[1]:
+            right_patch = image[y_min:y_max, x_max:x_max+patch_size]
+            if right_patch.size > 0:
+                # Reshape to match width of other patches
+                right_patch = np.repeat(right_patch, (x_max - x_min) // right_patch.shape[1] + 1, axis=1)
+                right_patch = right_patch[:, :(x_max - x_min)]
+                border_patches.append(right_patch)
+        
+        if not border_patches:
+            # If no border patches available, use inpainting as fallback
+            mask = np.zeros(image.shape[:2], np.uint8)
+            cv2.rectangle(mask, (x_min, y_min), (x_max, y_max), 255, -1)
+            return cv2.inpaint(image, mask, 3, cv2.INPAINT_TELEA)
+        
+        # Combine patches
+        try:
+            border_texture = np.concatenate(border_patches, axis=0)
+            
+            # Randomly sample from border texture to fill the region
+            for y in range(y_min, y_max, patch_size):
+                for x in range(x_min, x_max, patch_size):
+                    if border_texture.shape[0] > patch_size:
+                        # Get a random patch from the texture
+                        start_y = np.random.randint(0, border_texture.shape[0] - patch_size + 1)
+                        patch = border_texture[start_y:start_y + patch_size]
+                        
+                        # Ensure patch has correct width
+                        if patch.shape[1] > (x_max - x):
+                            patch = patch[:, :(x_max - x)]
+                        
+                        # Ensure patch has correct height
+                        if patch.shape[0] > (y_max - y):
+                            patch = patch[:(y_max - y), :]
+                        
+                        # Place the patch
+                        h, w = patch.shape[:2]
+                        region[y:y+h, x:x+w] = patch
+            
+            return region
+            
+        except Exception as e:
+            logger.warning(f"Patch filling failed, falling back to inpainting: {e}")
+            # Fallback to inpainting if patch filling fails
+            mask = np.zeros(image.shape[:2], np.uint8)
+            cv2.rectangle(mask, (x_min, y_min), (x_max, y_max), 255, -1)
+            return cv2.inpaint(image, mask, 3, cv2.INPAINT_TELEA)
+
     def replace_text_in_image(self, image_path, text_list, font_path=None, 
                             text_color=(0, 0, 0), outline_color=(255, 255, 255)):
         """
@@ -199,30 +285,31 @@ class MemeService:
         # Make a copy of the original image
         result_image = image.copy()
         
-        logger.info("Removing existing text...")
+        logger.info("Removing existing text using context-aware patch fill...")
         
-        # First, remove all detected text
+        # Remove all detected text using context-aware patch fill
         for i, detection in enumerate(text_results):
             bbox, text, prob = detection
-            logger.info(f"Removing text #{i+1}: '{text}' (Confidence: {prob:.4f})")
+            logger.info(f"Processing text #{i+1}: '{text}' (Confidence: {prob:.4f})")
             
-            # Convert bbox points to rectangle format for inpainting
+            # Convert bbox points to rectangle format
             # bbox format from EasyOCR: [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
             x_min = min(point[0] for point in bbox)
             y_min = min(point[1] for point in bbox)
             x_max = max(point[0] for point in bbox)
             y_max = max(point[1] for point in bbox)
             
-            # Create a mask for the text region - make it slightly larger to ensure all text is removed
-            mask = np.zeros(image.shape[:2], np.uint8)
-            padding = 5  # Add padding around text
-            cv2.rectangle(mask, 
-                         (max(0, int(x_min-padding)), max(0, int(y_min-padding))), 
-                         (min(image.shape[1], int(x_max+padding)), min(image.shape[0], int(y_max+padding))), 
-                         255, -1)
+            # Add padding around text region
+            padding = 10  # Increased padding for better blending
+            x_min = max(0, int(x_min - padding))
+            y_min = max(0, int(y_min - padding))
+            x_max = min(image.shape[1], int(x_max + padding))
+            y_max = min(image.shape[0], int(y_max + padding))
             
-            # Inpaint the text region (remove text)
-            result_image = cv2.inpaint(result_image, mask, 3, cv2.INPAINT_TELEA)
+            # Fill the region using context-aware patch fill
+            result_image = self.fill_with_neighbor_pixels(
+                result_image, x_min, y_min, x_max, y_max, patch_size=5
+            )
         
         # Convert to PIL image for drawing
         pil_image = Image.fromarray(cv2.cvtColor(result_image, cv2.COLOR_BGR2RGB))
