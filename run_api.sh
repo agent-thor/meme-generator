@@ -13,4 +13,6 @@ fi
 echo "Loading configuration from .env file..."
 
 echo "Starting Meme Generator API on port $(grep APP_PORT .env | cut -d= -f2)..."
-python app.py 
+python app.py
+echo "Starting Meme Generator Webapp on port $(grep PORT .env | cut -d= -f2)..."
+python webapp/app.py

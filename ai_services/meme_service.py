@@ -134,7 +134,7 @@ class MemeService:
                     return ImageFont.load_default()
     
     def generate_meme(self, image_path, text_list=None, output_path=None, 
-                       remove_existing_text=True, text_color=(0, 0, 0), outline_color=(255, 255, 255)):
+                       remove_existing_text=True, text_color=(0, 0, 0), outline_color=(255, 255, 255), font_path=None):
         """
         Generate a meme by adding text to an image based on detected text regions.
         
@@ -145,6 +145,7 @@ class MemeService:
             remove_existing_text: Whether to remove existing text from the image
             text_color: Color of the text (RGB tuple)
             outline_color: Color of the text outline (RGB tuple)
+            font_path: Optional path to custom font
             
         Returns:
             Path to the generated meme
@@ -158,7 +159,7 @@ class MemeService:
             
             # Process the image with text replacement
             result_image = self.replace_text_in_image(
-                image_path, text_list, text_color=text_color, outline_color=outline_color
+                image_path, text_list, font_path=font_path, text_color=text_color, outline_color=outline_color
             )
             
             # Generate output path if not provided
@@ -403,4 +404,122 @@ class MemeService:
         
         # Debug: print text width percentage
         text_percentage = (text_width / image_width) * 100
-        logger.debug(f"{vertical_position.capitalize()} text width: {text_width}px ({text_percentage:.1f}% of image width)") 
+        logger.debug(f"{vertical_position.capitalize()} text width: {text_width}px ({text_percentage:.1f}% of image width)")
+    
+    def generate_white_box_meme(self, image_path, top_text, bottom_text, output_path=None, font_path=None):
+        """
+        Generate a meme by adding white boxes (top and bottom) sized to the input text, and add the text inside the boxes.
+        Args:
+            image_path: Path to the input image
+            top_text: Text to add at the top
+            bottom_text: Text to add at the bottom
+            output_path: Path to save the result (optional)
+            font_path: Optional path to custom font
+        Returns:
+            Path to the generated meme
+        """
+        from PIL import ImageDraw, ImageFont
+        image = Image.open(image_path).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        width, height = image.size
+        font_size = self.calculate_optimal_font_size(top_text + bottom_text, width, height // 8, min_size=20, max_size=80)
+        font = self.get_font(font_size, font_path)
+        
+        # Top text box
+        if top_text:
+            # Use font.getbbox() instead of draw.textsize() (which is deprecated)
+            try:
+                # For newer Pillow versions
+                bbox = font.getbbox(top_text)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+            except AttributeError:
+                # Fall back to getsize for older Pillow versions
+                text_width, text_height = font.getsize(top_text)
+                
+            box_height = text_height + 20
+            draw.rectangle([(0, 0), (width, box_height)], fill="white")
+            draw.text(((width - text_width) // 2, 10), top_text, fill="black", font=font)
+            
+        # Bottom text box
+        if bottom_text:
+            # Use font.getbbox() instead of draw.textsize() (which is deprecated)
+            try:
+                # For newer Pillow versions
+                bbox = font.getbbox(bottom_text)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+            except AttributeError:
+                # Fall back to getsize for older Pillow versions
+                text_width, text_height = font.getsize(bottom_text)
+                
+            box_height = text_height + 20
+            draw.rectangle([(0, height - box_height), (width, height)], fill="white")
+            draw.text(((width - text_width) // 2, height - box_height + 10), bottom_text, fill="black", font=font)
+            
+        # Save result
+        if output_path is None:
+            data_dir = Path(__file__).parent.parent / "data" / "generated_memes"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            output_filename = f"whitebox_{os.path.basename(image_path)}"
+            output_path = str(data_dir / output_filename)
+        image.save(output_path)
+        return output_path
+    
+    def smart_generate_meme(self, image_path, top_text, bottom_text, vector_db=None, similarity_threshold=0.4, font_path=None):
+        """
+        Smart meme generation: search for similar image, use white box if similar, else use current approach.
+        Args:
+            image_path: Path to the input image
+            top_text: Top text for meme
+            bottom_text: Bottom text for meme
+            vector_db: ImageVectorDB instance
+            similarity_threshold: Similarity threshold for using white box approach
+            font_path: Optional font path
+        Returns:
+            (Path to generated meme, from_template: bool)
+        """
+        if vector_db is None:
+            from ai_services.image_vector_db import ImageVectorDB
+            vector_db = ImageVectorDB()
+        # Search for similar image
+        similar_path, similarity = vector_db.search(image_path, threshold=similarity_threshold)
+        print(f"Similarity: {similarity}")
+        if similar_path:
+            # Use white box meme approach
+            meme_path = self.generate_white_box_meme(similar_path, top_text, bottom_text, font_path=font_path)
+            from_template = True
+        else:
+            # Use current approach: remove text, add new text
+            meme_path = self.generate_meme(image_path, [top_text, bottom_text])
+            from_template = False
+            similarity = 0.0
+        # Add this image to the vector DB if not already present
+        if not similar_path or os.path.abspath(similar_path) != os.path.abspath(image_path):
+            vector_db.add_image(image_path)
+        return meme_path, from_template
+    
+    def remove_text_and_inpaint(self, image_path, min_confidence=0.5, output_path=None):
+        """
+        Remove all text regions with confidence > min_confidence and inpaint them.
+        Args:
+            image_path: Path to the input image
+            min_confidence: Minimum confidence for text to be removed
+            output_path: Path to save the cleaned image (optional)
+        Returns:
+            Path to the cleaned image
+        """
+        text_results, image = self.detect_text(image_path)
+        mask = np.zeros(image.shape[:2], np.uint8)
+        for bbox, text, prob in text_results:
+            if prob > min_confidence:
+                x_min = min(point[0] for point in bbox)
+                y_min = min(point[1] for point in bbox)
+                x_max = max(point[0] for point in bbox)
+                y_max = max(point[1] for point in bbox)
+                cv2.rectangle(mask, (int(x_min), int(y_min)), (int(x_max), int(y_max)), 255, -1)
+        inpainted = cv2.inpaint(image, mask, 3, cv2.INPAINT_TELEA)
+        if output_path is None:
+            output_path = str(Path(image_path).with_name(Path(image_path).stem + '_cleaned.jpg'))
+        cv2.imwrite(output_path, inpainted)
+        return output_path 

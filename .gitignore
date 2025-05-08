@@ -1,1 +1,7 @@
 .env
+
+# Ignore the entire data folder and its contents
+/data/
+/database/
+
+
