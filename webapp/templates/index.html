@@ -11,14 +11,19 @@
 </div>
 
 {% if last_meme_url %}
-<div class="row mb-5">
+<div class="row mb-5" id="meme-result">
     <div class="col-md-8 offset-md-2">
         <div class="card">
             <div class="card-header bg-success text-white">
                 <h2 class="card-title h5 mb-0">Your Generated Meme</h2>
             </div>
-            <div class="card-body text-center">
+            <div class="card-body text-center position-relative">
                 <img src="{{ last_meme_url }}" alt="Generated Meme" class="img-fluid rounded shadow" style="max-height: 400px;">
+                {% if session.get('from_template') %}
+                <div class="template-indicator from-template">Generated from meme template, similarity {{ "%.1f"|format(session.get('similarity_score', 0)) }}%</div>
+                {% else %}
+                <div class="template-indicator no-template">Generated from original image</div>
+                {% endif %}
                 <div class="mt-3">
                     <a href="{{ last_meme_url }}" class="btn btn-sm btn-outline-primary" target="_blank">View Full Size</a>
                     <a href="{{ last_meme_url }}" class="btn btn-sm btn-outline-secondary" download="meme.jpg">Download</a>

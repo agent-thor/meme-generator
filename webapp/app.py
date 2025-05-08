@@ -1,20 +1,19 @@
 """
 Flask application entrypoint for the webapp interface.
 """
+import sys
+from pathlib import Path
+# Define parent_dir for use throughout the app
+parent_dir = str(Path(__file__).resolve().parent.parent)
+sys.path.append(parent_dir)
 import os
-from flask import Flask, jsonify, redirect, url_for, request, send_from_directory
+from flask import Flask, jsonify, redirect, url_for, request, send_from_directory, send_file, session
 from datetime import datetime
 import requests
-from pathlib import Path
-import sys
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
-
-# Add parent directory to sys.path to allow importing from other modules
-parent_dir = str(Path(__file__).parent.parent)
-sys.path.append(parent_dir)
 
 # Flask application setup
 app = Flask(
@@ -46,17 +45,27 @@ def serve_data_file(filename):
 def proxy_to_meme_api():
     """Proxy requests to the meme generation API."""
     try:
-        # Configure the API URL (assuming the main API runs on port 5000)
+        # Configure the API URL (backend runs on port 5000 by default)
         meme_api_port = os.environ.get('MEME_API_PORT', '5000')
-        api_url = f"http://localhost:{meme_api_port}/api/generate"
+        api_url = f"http://localhost:{meme_api_port}/api/smart_generate"
         
         # Forward the request to the API
         response = requests.post(
             api_url, 
             data=request.form, 
             files=request.files if request.files else None,
+            headers={'X-Requested-With': 'XMLHttpRequest'} if request.headers.get('X-Requested-With') else {},
             timeout=30
         )
+        
+        # If JSON response, store info in session
+        if response.headers.get('Content-Type', '').startswith('application/json'):
+            try:
+                data = response.json()
+                session['from_template'] = data.get('from_template', False)
+                session['similarity_score'] = data.get('similarity_score', 0)
+            except:
+                pass
         
         # Return the API response
         return (

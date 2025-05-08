@@ -168,3 +168,80 @@ Edit `config.yaml` to set up:
 ## License
 
 MIT License
+
+## How It Works
+
+### Workflow Diagram
+
+```
+User Uploads Image
+        |
+        v
+Upload to S3 & Download Locally
+        |
+        v
+Remove Text (Inpaint) from Uploaded Image
+        |
+        v
+Vector DB Similarity Search (on cleaned image)
+        |
+   +----+----+
+   |         |
+[Similarity > 80%]   [No Good Match]
+   |         |
+   v         v
+White Box   Classic Meme
+Meme        Generation
+   |         |
+   +----+----+
+        |
+        v
+Return/Display Meme
+```
+
+### Working Process
+
+1. **Image Upload**
+    - User uploads an image via the web interface or API.
+
+2. **Upload to S3 & Download Locally**
+    - The image is uploaded to your S3 bucket for storage.
+    - The image is then downloaded to your local server for processing.
+
+3. **Remove Text from Uploaded Image**
+    - The backend uses `MemeService.remove_text_and_inpaint` to:
+      - Detect all text regions in the image (using EasyOCR).
+      - For each region with confidence > 0.5, create a mask and inpaint (remove) the text.
+      - Save the cleaned (text-free) image to a temporary file.
+
+4. **Image Similarity Search**
+    - The cleaned image is passed to the vector database (`ImageVectorDB`).
+    - The vector DB computes the image embedding (using CLIP) and searches for the most similar image among your pre-indexed meme templates.
+    - If a match is found with **similarity > 80%** (or your chosen threshold):
+        - The path to the most similar image is returned.
+    - If no match is found above the threshold, the process continues with the original image.
+
+5. **Meme Generation Logic**
+    - **If a similar image is found (similarity > 80%):**
+        - The system uses the matched template image.
+        - It adds a white box at the top and/or bottom of the image, sized to fit the input text.
+        - The user's text is rendered inside these boxes.
+        - The result is saved as the generated meme.
+    - **If no similar image is found:**
+        - The system uses the current meme generation approach:
+            - Detects and removes any existing text from the uploaded image.
+            - Adds the user's text in the appropriate locations (using detected regions or as classic meme text).
+        - The result is saved as the generated meme.
+
+6. **Return/Display the Meme**
+    - The generated meme image is saved in `data/generated_memes/`.
+    - The path or URL to the meme is returned to the user (or displayed in the web interface).
+
+---
+
+- **Vector DB Build Script (`scripts/build_vector_db.py`):**
+    - Run this script to precompute and store embeddings for all your meme templates (e.g., in `data/meme_templates/`).
+    - This ensures fast and accurate similarity search at runtime.
+
+- **Text Removal Utility:**
+    - The `remove_text_and_inpaint` method in `MemeService` can be used both during upload and when building the vector DB (if you want to store only cleaned templates).
