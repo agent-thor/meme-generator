@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "MemeZap",
+  "version": "1.0",
+  "description": "Replaces tweeted images with MemeZap-ed versions.",
+  "permissions": ["scripting", "activeTab", "storage"],
+  "host_permissions": [
+    "https://twitter.com/*", 
+    "https://*.x.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://twitter.com/*", 
+        "https://*.x.com/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "MemeZap"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+} 

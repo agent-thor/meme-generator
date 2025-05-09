@@ -1,32 +1,51 @@
 {% extends "base.html" %}
 
-{% block title %}Meme Generator - Home{% endblock %}
+{% block title %}MemeZap - Create Memes with AI{% endblock %}
 
 {% block content %}
 <div class="row">
-    <div class="col-md-6 offset-md-3 text-center mb-5">
-        <h1 class="display-4 mb-4">Welcome to Meme Generator</h1>
-        <p class="lead">Create hilarious memes with our powerful meme generation engine!</p>
+    <div class="col-md-8 offset-md-2 text-center mb-5">
+        <h1 class="display-4 mb-3">Welcome to <span class="text-gradient">MemeZap</span></h1>
+        <p class="lead">Create hilarious memes with our powerful AI-powered meme engine!</p>
+        <div class="d-flex justify-content-center mt-4">
+            <div class="funky-badge me-3">
+                <i class="fas fa-bolt"></i> Super Fast
+            </div>
+            <div class="funky-badge me-3">
+                <i class="fas fa-brain"></i> AI Powered
+            </div>
+            <div class="funky-badge">
+                <i class="fas fa-laugh-squint"></i> Hilarious Results
+            </div>
+        </div>
     </div>
 </div>
 
 {% if last_meme_url %}
 <div class="row mb-5" id="meme-result">
-    <div class="col-md-8 offset-md-2">
-        <div class="card">
-            <div class="card-header bg-success text-white">
-                <h2 class="card-title h5 mb-0">Your Generated Meme</h2>
+    <div class="col-md-10 offset-md-1">
+        <div class="card glow-card">
+            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                <h2 class="card-title h5 mb-0"><i class="fas fa-grin-tears me-2"></i>Your Generated Meme</h2>
             </div>
-            <div class="card-body text-center position-relative">
-                <img src="{{ last_meme_url }}" alt="Generated Meme" class="img-fluid rounded shadow" style="max-height: 400px;">
-                {% if session.get('from_template') %}
-                <div class="template-indicator from-template">Generated from meme template, similarity {{ "%.1f"|format(session.get('similarity_score', 0)) }}%</div>
+            <div class="card-body text-center position-relative p-0">
+                <img src="{{ last_meme_url }}" alt="Generated Meme" class="img-fluid shadow" style="max-height: 500px; cursor: pointer">
+                {% if session.get('from_template') == 'true' %}
+                <div class="template-indicator from-template">
+                    <i class="fas fa-check-circle me-1"></i>Generated from meme template ({{ "%.1f"|format(session.get('similarity_score', 0)) }}%)
+                </div>
                 {% else %}
-                <div class="template-indicator no-template">Generated from original image</div>
+                <div class="template-indicator no-template">
+                    <i class="fas fa-image me-1"></i>Generated from original image
+                </div>
                 {% endif %}
-                <div class="mt-3">
-                    <a href="{{ last_meme_url }}" class="btn btn-sm btn-outline-primary" target="_blank">View Full Size</a>
-                    <a href="{{ last_meme_url }}" class="btn btn-sm btn-outline-secondary" download="meme.jpg">Download</a>
+                <div class="p-3 d-flex justify-content-center">
+                    <a href="{{ last_meme_url }}" class="btn btn-primary me-2" target="_blank">
+                        <i class="fas fa-external-link-alt me-1"></i> View Full Size
+                    </a>
+                    <a href="{{ last_meme_url }}" class="btn btn-outline-primary" download="meme.jpg">
+                        <i class="fas fa-download me-1"></i> Download
+                    </a>
                 </div>
             </div>
         </div>
@@ -38,15 +57,22 @@
     <div class="col-md-8 offset-md-2">
         <div class="card">
             <div class="card-header bg-primary text-white">
-                <h2 class="card-title h5 mb-0">Create a Meme</h2>
+                <h2 class="card-title h5 mb-0"><i class="fas fa-magic me-2"></i>Create a Meme</h2>
             </div>
             <div class="card-body">
                 <form method="POST" enctype="multipart/form-data">
                     {{ form.csrf_token }}
                     
-                    <div class="mb-3">
-                        {{ form.image.label(class="form-label") }}
-                        {{ form.image(class="form-control") }}
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">
+                            <i class="fas fa-upload me-2"></i>{{ form.image.label.text }}
+                        </label>
+                        <div class="input-wrapper">
+                            {{ form.image(class="form-control") }}
+                            <div class="input-icon">
+                                <i class="fas fa-image"></i>
+                            </div>
+                        </div>
                         {% if form.image.errors %}
                             <div class="alert alert-danger mt-2">
                                 {% for error in form.image.errors %}
@@ -56,11 +82,18 @@
                         {% endif %}
                     </div>
                     
-                    <div class="row">
+                    <div class="row mb-4">
                         <div class="col-md-6">
                             <div class="mb-3">
-                                {{ form.top_text.label(class="form-label") }}
-                                {{ form.top_text(class="form-control") }}
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-arrow-up me-2"></i>{{ form.top_text.label.text }}
+                                </label>
+                                <div class="input-wrapper">
+                                    {{ form.top_text(class="form-control", placeholder="Text at the top") }}
+                                    <div class="input-icon">
+                                        <i class="fas fa-font"></i>
+                                    </div>
+                                </div>
                                 {% if form.top_text.errors %}
                                     <div class="alert alert-danger mt-2">
                                         {% for error in form.top_text.errors %}
@@ -72,8 +105,15 @@
                         </div>
                         <div class="col-md-6">
                             <div class="mb-3">
-                                {{ form.bottom_text.label(class="form-label") }}
-                                {{ form.bottom_text(class="form-control") }}
+                                <label class="form-label fw-bold">
+                                    <i class="fas fa-arrow-down me-2"></i>{{ form.bottom_text.label.text }}
+                                </label>
+                                <div class="input-wrapper">
+                                    {{ form.bottom_text(class="form-control", placeholder="Text at the bottom") }}
+                                    <div class="input-icon">
+                                        <i class="fas fa-font"></i>
+                                    </div>
+                                </div>
                                 {% if form.bottom_text.errors %}
                                     <div class="alert alert-danger mt-2">
                                         {% for error in form.bottom_text.errors %}
@@ -85,9 +125,16 @@
                         </div>
                     </div>
                     
-                    <div class="mb-3">
-                        {{ form.additional_text.label(class="form-label") }}
-                        {{ form.additional_text(class="form-control", rows=3) }}
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">
+                            <i class="fas fa-align-left me-2"></i>{{ form.additional_text.label.text }}
+                        </label>
+                        <div class="input-wrapper">
+                            {{ form.additional_text(class="form-control", rows=2, placeholder="Add more text separated by | character") }}
+                            <div class="input-icon">
+                                <i class="fas fa-paragraph"></i>
+                            </div>
+                        </div>
                         <div class="form-text">{{ form.additional_text.description }}</div>
                         {% if form.additional_text.errors %}
                             <div class="alert alert-danger mt-2">
@@ -99,7 +146,7 @@
                     </div>
                     
                     <div class="d-grid">
-                        {{ form.submit(class="btn btn-primary btn-lg") }}
+                        {{ form.submit(class="btn btn-primary btn-lg fw-bold") }}
                     </div>
                 </form>
             </div>
@@ -109,15 +156,96 @@
 
 <div class="row mt-5">
     <div class="col-md-8 offset-md-2">
-        <div class="card">
+        <div class="card card-coming-soon">
             <div class="card-header bg-secondary text-white">
-                <h2 class="card-title h5 mb-0">Try our Chat Interface</h2>
+                <h2 class="card-title h5 mb-0"><i class="fas fa-robot me-2"></i>Chat with Meme</h2>
             </div>
             <div class="card-body">
-                <p>Prefer a conversational approach? Try our chat interface for a more interactive experience.</p>
-                <a href="{{ url_for('main.chat') }}" class="btn btn-secondary">Go to Chat</a>
+                <div class="d-flex align-items-center">
+                    <div class="flex-grow-1">
+                        <p class="mb-1">Our AI-powered chat interface for creating memes through conversation is coming soon!</p>
+                        <p class="text-muted mb-0"><small>We're working hard to bring you an even more intuitive way to create memes.</small></p>
+                    </div>
+                    <div class="ms-3">
+                        <span class="badge bg-warning text-dark px-3 py-2 pulse-badge">Coming Soon</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    .card-coming-soon {
+        border-color: var(--secondary-accent);
+    }
+    
+    .pulse-badge {
+        animation: pulse 2s infinite;
+    }
+    
+    .text-gradient {
+        background: linear-gradient(90deg, #ff7e5f, #feb47b, #7f7fd5, #6f42c1);
+        background-size: 300% 300%;
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        animation: gradientBg 10s ease infinite;
+    }
+    
+    .funky-badge {
+        display: inline-block;
+        padding: 8px 15px;
+        background: rgba(111, 66, 193, 0.15);
+        color: var(--text-color);
+        border-radius: 50px;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        backdrop-filter: blur(5px);
+    }
+    
+    .funky-badge:hover {
+        transform: translateY(-3px);
+        background: rgba(111, 66, 193, 0.25);
+    }
+    
+    .input-wrapper {
+        position: relative;
+    }
+    
+    .input-icon {
+        position: absolute;
+        right: 15px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--text-muted);
+        pointer-events: none;
+    }
+    
+    textarea + .input-icon {
+        top: 25px;
+    }
+    
+    .glow-card {
+        animation: card-glow 4s infinite alternate;
+    }
+    
+    @keyframes card-glow {
+        0% {
+            box-shadow: 0 8px 20px rgba(111, 66, 193, 0.2);
+        }
+        100% {
+            box-shadow: 0 8px 30px rgba(111, 66, 193, 0.5);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // No debug code needed anymore
+    });
+</script>
 {% endblock %} 

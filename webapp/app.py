@@ -62,9 +62,13 @@ def proxy_to_meme_api():
         if response.headers.get('Content-Type', '').startswith('application/json'):
             try:
                 data = response.json()
-                session['from_template'] = data.get('from_template', False)
+                # Convert boolean to string to avoid session serialization issues
+                is_from_template = data.get('from_template', False)
+                session['from_template'] = 'true' if is_from_template else 'false'
                 session['similarity_score'] = data.get('similarity_score', 0)
-            except:
+                print(f"DEBUG - Session data: from_template={session['from_template']}, similarity_score={session['similarity_score']}")
+            except Exception as e:
+                print(f"DEBUG - Error parsing JSON in proxy: {e}")
                 pass
         
         # Return the API response
