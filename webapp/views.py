@@ -115,6 +115,26 @@ def index():
                     user_response_dir = Path(__file__).parent.parent / "data" / "user_response_meme"
                     user_response_dir.mkdir(parents=True, exist_ok=True)
                     
+                    # Try to parse JSON response to get template info
+                    try:
+                        content_type = response.headers.get('Content-Type', '')
+                        if 'application/json' in content_type:
+                            resp_data = response.json()
+                            is_from_template = resp_data.get('from_template', False)
+                            session['from_template'] = 'true' if is_from_template else 'false'
+                            session['similarity_score'] = resp_data.get('similarity_score', 0)
+                            logger.info(f"Meme source info: from_template={session['from_template']}, similarity={session['similarity_score']}")
+                        else:
+                            # Not a JSON response, use default values
+                            session['from_template'] = 'false'
+                            session['similarity_score'] = 0
+                            logger.info("Response is not JSON, setting default values")
+                    except Exception as e:
+                        # Error parsing JSON
+                        session['from_template'] = 'false'
+                        session['similarity_score'] = 0
+                        logger.warning(f"Error parsing JSON response: {e}")
+                    
                     # Save the generated meme
                     result_path = save_image_from_response(
                         response, 

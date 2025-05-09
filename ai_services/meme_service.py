@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 import os
 from pathlib import Path
 import sys
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -522,4 +523,254 @@ class MemeService:
         if output_path is None:
             output_path = str(Path(image_path).with_name(Path(image_path).stem + '_cleaned.jpg'))
         cv2.imwrite(output_path, inpainted)
-        return output_path 
+        return output_path
+    
+    def generate_meme_from_clean(self, clean_image_path, text_list=None, output_path=None, 
+                                text_color=(0, 0, 0), outline_color=(255, 255, 255), font_path=None,
+                                detect_text_areas=True):
+        """
+        Generate a meme from an already cleaned image, skipping the text removal step.
+        
+        Args:
+            clean_image_path: Path to the already cleaned input image
+            text_list: List of strings to add to the image. Can be:
+                - None or empty list: No text added
+                - Single item: Added as top text
+                - Two items: Added as top and bottom text
+                - More items: First as top, last as bottom, rest placed intelligently
+            output_path: Path where to save the result (default: generates a path in data/generated_memes)
+            text_color: Color of the text (RGB tuple)
+            outline_color: Color of the text outline (RGB tuple)
+            font_path: Optional path to custom font
+            detect_text_areas: Whether to detect text areas for placement (set False to add as top/bottom text)
+            
+        Returns:
+            Path to the generated meme
+        """
+        try:
+            # Ensure text_list is a list and handle empty text
+            if text_list is None:
+                text_list = []
+            elif isinstance(text_list, str):
+                text_list = [text_list]
+            
+            # Filter out empty strings
+            text_list = [text for text in text_list if text.strip()]
+            
+            # If no text provided, just return the cleaned image
+            if not text_list:
+                # Create directory if needed
+                data_dir = Path(__file__).parent.parent / "data" / "generated_memes"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Default output path
+                if output_path is None:
+                    output_filename = f"meme_{os.path.basename(clean_image_path)}"
+                    output_path = str(data_dir / output_filename)
+                
+                # Just copy the cleaned image
+                shutil.copy2(clean_image_path, output_path)
+                logger.info(f"No text provided, returning cleaned image: {output_path}")
+                return output_path
+            
+            # Load the image directly (skip text removal)
+            image = cv2.imread(clean_image_path)
+            if image is None:
+                raise ValueError(f"Could not read image from {clean_image_path}")
+                
+            # Convert to PIL for text manipulation
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            pil_image = Image.fromarray(image_rgb)
+            draw = ImageDraw.Draw(pil_image)
+
+            # Extract top, bottom and middle texts
+            top_text = text_list[0] if len(text_list) > 0 else ""
+            bottom_text = text_list[-1] if len(text_list) > 1 else ""
+            middle_texts = text_list[1:-1] if len(text_list) > 2 else []
+            
+            # Log what we're working with
+            if top_text:
+                logger.info(f"Using top text: '{top_text}'")
+            if bottom_text and bottom_text != top_text:
+                logger.info(f"Using bottom text: '{bottom_text}'")
+            if middle_texts:
+                logger.info(f"Additional middle texts: {len(middle_texts)}")
+
+            # Detected text areas (if requested and available)
+            text_positions = []
+            if detect_text_areas and middle_texts:
+                # Only detect text areas for middle texts
+                text_results, _ = self.detect_text(clean_image_path)
+                
+                # If we have middle texts and detected areas, match them
+                if text_results and middle_texts:
+                    # Use only as many text areas as we have middle texts
+                    text_areas = text_results[:len(middle_texts)] if len(text_results) <= len(middle_texts) else text_results
+                    
+                    # Process detected text positions
+                    for i, detection in enumerate(text_areas):
+                        if i < len(middle_texts):
+                            bbox, _, _ = detection
+                            
+                            # Calculate the center of the bounding box
+                            x_min = min(point[0] for point in bbox)
+                            y_min = min(point[1] for point in bbox)
+                            x_max = max(point[0] for point in bbox)
+                            y_max = max(point[1] for point in bbox)
+                            
+                            bbox_width = x_max - x_min
+                            bbox_height = y_max - y_min
+                            
+                            # Save position data
+                            text_positions.append({
+                                'x_min': x_min,
+                                'y_min': y_min,
+                                'width': bbox_width,
+                                'height': bbox_height,
+                                'text': middle_texts[i]
+                            })
+            
+            # Add top text (if any)
+            if top_text:
+                font_size = self.calculate_optimal_font_size(
+                    top_text, pil_image.width, 100, min_size=20, max_size=80
+                )
+                font = self.get_font(font_size, font_path)
+                
+                # Get text dimensions
+                if hasattr(font, "getbbox"):
+                    text_bbox = font.getbbox(top_text)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    text_height = text_bbox[3] - text_bbox[1]
+                else:
+                    text_width, text_height = font.getsize(top_text)
+                
+                # Position at top
+                text_x = (pil_image.width - text_width) / 2
+                text_y = 20  # Some padding from top
+                
+                # Draw text
+                self._draw_text_with_outline_at_position(
+                    draw, top_text, font, int(text_x), int(text_y),
+                    text_color=text_color, outline_color=outline_color
+                )
+                
+                logger.info(f"Added top text: '{top_text}'")
+            
+            # Add bottom text (if any and different from top)
+            if bottom_text and (len(text_list) > 1 or not top_text):
+                font_size = self.calculate_optimal_font_size(
+                    bottom_text, pil_image.width, 100, min_size=20, max_size=80
+                )
+                font = self.get_font(font_size, font_path)
+                
+                # Get text dimensions
+                if hasattr(font, "getbbox"):
+                    text_bbox = font.getbbox(bottom_text)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    text_height = text_bbox[3] - text_bbox[1]
+                else:
+                    text_width, text_height = font.getsize(bottom_text)
+                
+                # Position at bottom
+                text_x = (pil_image.width - text_width) / 2
+                text_y = pil_image.height - text_height - 20  # Some padding from bottom
+                
+                # Draw text
+                self._draw_text_with_outline_at_position(
+                    draw, bottom_text, font, int(text_x), int(text_y),
+                    text_color=text_color, outline_color=outline_color
+                )
+                
+                logger.info(f"Added bottom text: '{bottom_text}'")
+            
+            # Draw middle texts at detected positions
+            for position in text_positions:
+                # Calculate optimal font size for the area
+                text = position['text']
+                box_width = position['width']
+                box_height = position['height'] * 1.2  # Allow slight increase
+                
+                font_size = self.calculate_optimal_font_size(
+                    text, box_width, box_height, min_size=10, max_size=100
+                )
+                
+                font = self.get_font(font_size, font_path)
+                
+                # Get text dimensions
+                if hasattr(font, "getbbox"):
+                    text_bbox = font.getbbox(text)
+                    text_width = text_bbox[2] - text_bbox[0]
+                    text_height = text_bbox[3] - text_bbox[1]
+                else:
+                    text_width, text_height = font.getsize(text)
+                
+                # Position text at center of detected area
+                text_x = position['x_min'] + (position['width'] - text_width) / 2
+                text_y = position['y_min'] + (position['height'] - text_height) / 2
+                
+                # Draw text with outline
+                self._draw_text_with_outline_at_position(
+                    draw, text, font, int(text_x), int(text_y),
+                    text_color=text_color, outline_color=outline_color
+                )
+                
+                logger.info(f"Added middle text '{text}' at detected position")
+            
+            # Additional middle texts that didn't get positioned based on detection
+            remaining_middle_texts = middle_texts[len(text_positions):]
+            if remaining_middle_texts:
+                # Distribute remaining texts evenly in the middle area of the image
+                available_height = pil_image.height - 100  # Allow margin for top/bottom texts
+                start_y = 100  # Start after the top margin
+                
+                # Calculate spacing between lines
+                spacing = available_height / (len(remaining_middle_texts) + 1)
+                
+                for i, text in enumerate(remaining_middle_texts):
+                    y_position = start_y + spacing * (i + 1)
+                    
+                    font_size = self.calculate_optimal_font_size(
+                        text, pil_image.width * 0.9, 80, min_size=15, max_size=60
+                    )
+                    font = self.get_font(font_size, font_path)
+                    
+                    # Get text dimensions
+                    if hasattr(font, "getbbox"):
+                        text_bbox = font.getbbox(text)
+                        text_width = text_bbox[2] - text_bbox[0]
+                        text_height = text_bbox[3] - text_bbox[1]
+                    else:
+                        text_width, text_height = font.getsize(text)
+                    
+                    # Center horizontally
+                    text_x = (pil_image.width - text_width) / 2
+                    text_y = y_position - text_height / 2  # Center on calculated y position
+                    
+                    # Draw text
+                    self._draw_text_with_outline_at_position(
+                        draw, text, font, int(text_x), int(text_y),
+                        text_color=text_color, outline_color=outline_color
+                    )
+                    
+                    logger.info(f"Added middle text '{text}' at calculated position")
+            
+            # Convert back to OpenCV format
+            result_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            
+            # Generate output path if not provided
+            if output_path is None:
+                data_dir = Path(__file__).parent.parent / "data" / "generated_memes"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                output_filename = f"meme_{os.path.basename(clean_image_path)}"
+                output_path = str(data_dir / output_filename)
+            
+            # Save the result
+            cv2.imwrite(output_path, result_image)
+            logger.info(f"Generated meme saved to {output_path}")
+            
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Error generating meme from clean image: {e}")
+            raise 

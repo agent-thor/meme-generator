@@ -106,7 +106,26 @@ def configure_routes(app):
         try:
             image_url = request.form.get('image_url')
             caption = request.form.get('caption', '')
-            top_text, bottom_text, *_ = (caption.split('|') + ['', ''])[:2]
+            
+            # Process the caption text carefully
+            if caption:
+                # Split by pipe character for top/bottom/middle text
+                text_parts = [part.strip() for part in caption.split('|')]
+                # Remove any empty strings from the list
+                text_parts = [part for part in text_parts if part]
+                
+                # For template-based memes, we'll use just top and bottom texts
+                top_text = text_parts[0] if text_parts else ""
+                bottom_text = text_parts[1] if len(text_parts) > 1 else ""
+                
+                # Log what we received
+                logger.info(f"Caption received: '{caption}'")
+                logger.info(f"Parsed into {len(text_parts)} text parts")
+            else:
+                text_parts = []
+                top_text = ""
+                bottom_text = ""
+                logger.info("No caption text provided")
             
             # Setup necessary directories
             project_root = Path(__file__).parent.parent
@@ -175,7 +194,7 @@ def configure_routes(app):
                     logger.info(f"  Simailr image {i+1}. {path}: {score*100:.2f}%")
                 
                 # Use the top result if available and score is high enough
-                if top_results and top_results[0][1] >= 0.5:
+                if top_results and top_results[0][1] >= 0.8:
                     similar_path, similarity = top_results[0]
                     logger.info(f"Using top similar image: {similar_path} with score: {similarity*100:.2f}%")
                 else:
@@ -187,7 +206,7 @@ def configure_routes(app):
                 similar_path = None
                 similarity = 0
             
-            # Generate meme based on similarity search result
+            # Test if similar template exists
             if similar_path and os.path.exists(similar_path):
                 # Use white box meme approach with template from meme_templates
                 logger.info(f"Generating meme from template: {similar_path}")
@@ -195,11 +214,18 @@ def configure_routes(app):
                     similar_path, top_text, bottom_text
                 )
                 from_template = True
+                logger.info(f"DEBUG - Using template: from_template={from_template}")
             else:
-                # Use the cleaned image with normal text approach
+                # Use the cleaned image with new method to avoid redundant cleaning
                 logger.info(f"No similar template found, generating from cleaned image")
-                meme_path = meme_service.generate_meme(cleaned_image_path, [top_text, bottom_text])
+                # Pass all text parts to handle properly
+                meme_path = meme_service.generate_meme_from_clean(
+                    cleaned_image_path, 
+                    text_parts,  # Pass all parsed text parts
+                    detect_text_areas=True
+                )
                 from_template = False
+                logger.info(f"DEBUG - Not using template: from_template={from_template}")
             
             # Get the similarity score
             similarity_score = float(similarity * 100) if from_template else 0  # Convert to percentage
@@ -218,6 +244,10 @@ def configure_routes(app):
                 # Get relative path for web display
                 rel_path = os.path.relpath(output_path, project_root)
                 meme_url = f"/{rel_path.replace(os.sep, '/')}"
+                
+                # Print debug info
+                print(f"DEBUG - Returning template info in JSON response: from_template={from_template}, similarity_score={similarity_score}")
+                
                 return jsonify({
                     'meme_url': meme_url, 
                     'from_template': from_template,
