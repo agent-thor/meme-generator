@@ -247,14 +247,84 @@ function processTweetWithMemeZap(tweetContainer) {
  * Processes a quoted tweet that was found to contain @memezap
  */
 function processQuotedTweet() {
+  log('Attempting to find quoted tweet in composition mode');
+
   // Get the quoted tweet container - trying multiple selectors for robustness
-  const quotedTweet = document.querySelector('[data-testid="quotedTweet"], [role="blockquote"]');
+  const quotedTweetSelectors = [
+    '[data-testid="quotedTweet"]',
+    '[role="blockquote"]',
+    '[aria-labelledby*="quoted-tweet"]',
+    '[aria-label*="Quote"]',
+    '[aria-label*="quote"]'
+  ];
+
+  let quotedTweet = null;
+  for (const selector of quotedTweetSelectors) {
+    const element = document.querySelector(selector);
+    if (element) {
+      quotedTweet = element;
+      log(`Found quoted tweet with selector: ${selector}`);
+      break;
+    }
+  }
+
   if (!quotedTweet) {
-    log('No quoted tweet found in composition mode');
+    // Try finding by container relationships
+    log('Trying to find quoted tweet by composition context');
+    
+    const compositionBox = document.querySelector('[data-testid="tweetTextarea_0"], [role="textbox"]');
+    if (compositionBox) {
+      // Look up to 5 levels up for a container that might contain the quoted tweet
+      let current = compositionBox;
+      for (let i = 0; i < 5; i++) {
+        current = current.parentElement;
+        if (!current) break;
+        
+        // Look for elements that might be media containers
+        const mediaContainers = current.querySelectorAll('div[data-testid*="media"], [aria-labelledby*="image"], [role="img"]');
+        if (mediaContainers.length > 0) {
+          // Check if any contain images
+          for (const container of mediaContainers) {
+            const images = container.querySelectorAll('img');
+            if (images.length > 0) {
+              log('Found potential quoted tweet by media container');
+              quotedTweet = container;
+              break;
+            }
+          }
+        }
+        
+        if (quotedTweet) break;
+      }
+    }
+  }
+
+  if (!quotedTweet) {
+    // Last resort: look for any large image containers in the composition area
+    const composers = document.querySelectorAll('[role="dialog"], [aria-label*="Compose"]');
+    for (const composer of composers) {
+      const images = composer.querySelectorAll('img[src*="twimg"]');
+      if (images.length > 0) {
+        log('Found image within composer dialog, treating parent as quoted tweet');
+        // Use the closest container of the first image as the "quoted tweet"
+        let container = images[0].parentElement;
+        // Go up a couple levels to get a better container
+        for (let i = 0; i < 3 && container; i++) {
+          quotedTweet = container;
+          container = container.parentElement;
+        }
+        break;
+      }
+    }
+  }
+
+  if (!quotedTweet) {
+    log('No quoted tweet found in composition mode after all attempts');
+    showErrorMessage('No quoted tweet found. Make sure you have an image in the quoted tweet.');
     return;
   }
   
-  log('Found quoted tweet in composition mode');
+  log('Found quoted tweet in composition mode, processing it');
   // Process the quoted tweet
   processQuotedTweetElement(quotedTweet);
 }
@@ -263,13 +333,81 @@ function processQuotedTweet() {
  * Processes a quoted tweet element to extract the image and send it to the backend
  */
 function processQuotedTweetElement(quotedTweet, parentTweet = null) {
-  // Find the image in the quoted tweet - try multiple selectors
-  const tweetImage = quotedTweet.querySelector('img[src*="pbs.twimg.com/media"]') || 
-                     quotedTweet.querySelector('[data-testid="tweetPhoto"] img') ||
-                     quotedTweet.querySelector('img[alt]'); // Fallback to any img with alt
+  log('Processing quoted tweet element:', quotedTweet);
+  
+  // Log all images in the quoted tweet for debugging
+  const allImages = quotedTweet.querySelectorAll('img');
+  log(`Found ${allImages.length} total images in quoted tweet`);
+  allImages.forEach((img, i) => {
+    log(`Image ${i+1} src: ${img.src.substring(0, 100)}...`);
+  });
+  
+  // Find the image in the quoted tweet - try multiple selectors with more aggressive matching
+  const imageSelectors = [
+    'img[src*="pbs.twimg.com/media"]',
+    'img[src*="twimg.com"]',
+    '[data-testid="tweetPhoto"] img',
+    'div[data-testid="tweetPhoto"] img',
+    'div[aria-label="Image"] img',
+    'div[role="img"] img',
+    'img[alt]',
+    'img'  // Last resort - any image
+  ];
+  
+  let tweetImage = null;
+  for (const selector of imageSelectors) {
+    const images = quotedTweet.querySelectorAll(selector);
+    if (images.length > 0) {
+      // Prioritize larger images (likely the main tweet image)
+      let bestImage = images[0];
+      let largestArea = 0;
+      
+      for (const img of images) {
+        const area = img.width * img.height;
+        if (area > largestArea) {
+          largestArea = area;
+          bestImage = img;
+        }
+      }
+      
+      tweetImage = bestImage;
+      log(`Found image with selector: ${selector}`);
+      break;
+    }
+  }
   
   if (!tweetImage) {
-    log('No image found in quoted tweet');
+    log('No image found in quoted tweet using standard selectors');
+    
+    // Last resort: look for any image in the quoted tweet's first 3 levels
+    try {
+      function findFirstImage(element, depth = 0) {
+        if (depth > 3) return null;
+        
+        if (element.tagName === 'IMG' && element.src && !element.src.includes('profile')) {
+          return element;
+        }
+        
+        for (const child of element.children) {
+          const found = findFirstImage(child, depth + 1);
+          if (found) return found;
+        }
+        
+        return null;
+      }
+      
+      tweetImage = findFirstImage(quotedTweet);
+      if (tweetImage) {
+        log('Found image using recursive search:', tweetImage.src.substring(0, 100) + '...');
+      }
+    } catch (e) {
+      log('Error in recursive image search:', e);
+    }
+  }
+  
+  if (!tweetImage) {
+    log('No image found in quoted tweet after all attempts');
+    showErrorMessage('No image found in the quoted tweet');
     return;
   }
   
@@ -279,6 +417,7 @@ function processQuotedTweetElement(quotedTweet, parentTweet = null) {
   originalImgUrl = originalImgUrl.replace(/&name=\w+/, '&name=orig');
   
   log('Found image in quoted tweet:', originalImgUrl);
+  log('Image dimensions:', tweetImage.width, 'x', tweetImage.height);
   
   // Get text from parent tweet to use as caption (excluding @memezap)
   let captionText = '';
@@ -563,3 +702,8 @@ initMemeZap();
 setTimeout(initMemeZap, 1000);
 setTimeout(scanPageForTweets, 2000);
 setTimeout(scanPageForTweets, 5000); 
+
+
+
+
+
