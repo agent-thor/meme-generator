@@ -11,6 +11,7 @@ from flask import Flask, jsonify, redirect, url_for, request, send_from_director
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 # Load environment variables from .env file
 load_dotenv()
@@ -85,6 +86,9 @@ def proxy_to_meme_api():
 # Import and register routes
 from webapp.views import main
 app.register_blueprint(main)
+
+# Add CORS support
+CORS(app, origins=["https://your-vercel-domain.vercel.app"])
 
 if __name__ == "__main__":
     # Get port from environment or use default
