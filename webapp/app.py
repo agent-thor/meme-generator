@@ -1,5 +1,5 @@
 """
-Flask application entrypoint for the webapp interface.
+Quart application entrypoint for the webapp interface.
 """
 import sys
 from pathlib import Path
@@ -7,17 +7,18 @@ from pathlib import Path
 parent_dir = str(Path(__file__).resolve().parent.parent)
 sys.path.append(parent_dir)
 import os
-from flask import Flask, jsonify, redirect, url_for, request, send_from_directory, send_file, session
+import asyncio
+import aiohttp
+from quart import Quart, jsonify, redirect, url_for, request, send_from_directory, send_file, session
 from datetime import datetime
-import requests
 from dotenv import load_dotenv
-from flask_cors import CORS
+from quart_cors import cors
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Flask application setup
-app = Flask(
+# Quart application setup
+app = Quart(
     __name__,
     template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates"),
     static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
@@ -34,51 +35,62 @@ def inject_now():
 
 # Serve files from data directory
 @app.route('/data/<path:filename>')
-def serve_data_file(filename):
+async def serve_data_file(filename):
     """Serve files from the data directory."""
-    return send_from_directory(
+    return await send_from_directory(
         os.path.join(parent_dir, 'data'),
         filename
     )
 
 # Create a proxy route to the meme API
 @app.route('/api/generate', methods=['POST'])
-def proxy_to_meme_api():
+async def proxy_to_meme_api():
     """Proxy requests to the meme generation API."""
     try:
         # Configure the API URL (backend runs on port 5000 by default)
         meme_api_port = os.environ.get('MEME_API_PORT', '5000')
         api_url = f"http://localhost:{meme_api_port}/api/smart_generate"
         
-        # Forward the request to the API
-        response = requests.post(
-            api_url, 
-            data=request.form, 
-            files=request.files if request.files else None,
-            headers={'X-Requested-With': 'XMLHttpRequest'} if request.headers.get('X-Requested-With') else {},
-            timeout=30
-        )
+        # Get form data and files
+        form_data = await request.form
+        files = {}
         
-        # If JSON response, store info in session
-        if response.headers.get('Content-Type', '').startswith('application/json'):
-            try:
-                data = response.json()
-                # Convert boolean to string to avoid session serialization issues
-                is_from_template = data.get('from_template', False)
-                session['from_template'] = 'true' if is_from_template else 'false'
-                session['similarity_score'] = data.get('similarity_score', 0)
-                print(f"DEBUG - Session data: from_template={session['from_template']}, similarity_score={session['similarity_score']}")
-            except Exception as e:
-                print(f"DEBUG - Error parsing JSON in proxy: {e}")
-                pass
+        # Handle file uploads if present
+        if 'image' in form_data and hasattr(form_data['image'], 'read'):
+            file_data = form_data['image']
+            files = {'image': (file_data.filename, await file_data.read(), file_data.content_type)}
         
-        # Return the API response
-        return (
-            response.content, 
-            response.status_code, 
-            {'Content-Type': response.headers.get('Content-Type', 'application/json')}
-        )
-    except requests.RequestException as e:
+        # Forward the request to the API using aiohttp
+        async with aiohttp.ClientSession() as client_session:
+            headers = {}
+            if request.headers.get('X-Requested-With'):
+                headers['X-Requested-With'] = request.headers.get('X-Requested-With')
+                
+            async with client_session.post(
+                api_url, 
+                data=form_data, 
+                headers=headers,
+                timeout=30
+            ) as response:
+                content = await response.read()
+                content_type = response.headers.get('Content-Type', 'application/json')
+                
+                # If JSON response, store info in session
+                if content_type.startswith('application/json'):
+                    try:
+                        data = await response.json()
+                        # Convert boolean to string to avoid session serialization issues
+                        is_from_template = data.get('from_template', False)
+                        session['from_template'] = 'true' if is_from_template else 'false'
+                        session['similarity_score'] = data.get('similarity_score', 0)
+                        print(f"DEBUG - Session data: from_template={session['from_template']}, similarity_score={session['similarity_score']}")
+                    except Exception as e:
+                        print(f"DEBUG - Error parsing JSON in proxy: {e}")
+                        pass
+                
+                # Return the API response
+                return content, response.status, {'Content-Type': content_type}
+    except Exception as e:
         return jsonify({
             'error': f"Failed to connect to meme API: {str(e)}"
         }), 500
@@ -88,7 +100,7 @@ from webapp.views import main
 app.register_blueprint(main)
 
 # Add CORS support
-CORS(app, origins=["https://your-vercel-domain.vercel.app"])
+app = cors(app, allow_origin=["https://your-vercel-domain.vercel.app"])
 
 if __name__ == "__main__":
     # Get port from environment or use default
@@ -98,5 +110,13 @@ if __name__ == "__main__":
     print(f"Template folder: {app.template_folder}")
     print(f"Static folder: {app.static_folder}")
     
-    # Run the app
-    app.run(debug=True, host="0.0.0.0", port=port) 
+    # Run the app with hypercorn for better concurrency
+    import hypercorn.asyncio
+    from hypercorn.config import Config
+    
+    config = Config()
+    config.bind = [f"0.0.0.0:{port}"]
+    config.use_reloader = True
+    config.workers = os.cpu_count() or 4  # Use CPU count for workers
+    
+    asyncio.run(hypercorn.asyncio.serve(app, config)) 

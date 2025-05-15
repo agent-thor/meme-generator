@@ -9,6 +9,10 @@ from pathlib import Path
 import uuid
 from botocore.exceptions import ClientError, NoCredentialsError, CredentialRetrievalError
 from dotenv import load_dotenv
+import aioboto3
+import aiofiles
+import asyncio
+from datetime import datetime
 
 # Load environment variables from .env file
 load_dotenv()
@@ -288,4 +292,97 @@ def upload_image_to_s3(file_path):
     file_extension = os.path.splitext(file_path)[1].lower()
     content_type = extension_to_content_type.get(file_extension, 'application/octet-stream')
     
-    return upload_file_to_s3(file_path, content_type) 
+    return upload_file_to_s3(file_path, content_type)
+
+async def upload_file_to_s3_async(file_path, content_type=None):
+    """
+    Asynchronously upload a file to S3 and return the URL.
+    
+    Args:
+        file_path: Path to the file to upload
+        content_type: MIME type of the file (optional)
+        
+    Returns:
+        URL of the uploaded file
+    """
+    try:
+        # Get configuration
+        config = load_config()
+        bucket_name = config.get('bucket_name')
+        
+        # If no bucket name is configured, return local file path
+        if not bucket_name:
+            logger.warning("No S3 bucket configured, using local file path")
+            local_url = f"file://{file_path}"
+            return local_url
+        
+        # Generate a unique key for the file
+        file_name = os.path.basename(file_path)
+        key = f"uploads/{datetime.now().strftime('%Y%m%d')}/{str(uuid.uuid4())[:8]}/{file_name}"
+        
+        # Create a session
+        session = aioboto3.Session()
+        
+        # Read file content asynchronously
+        async with aiofiles.open(file_path, 'rb') as f:
+            file_content = await f.read()
+        
+        # Upload to S3
+        async with session.client('s3', 
+                                  region_name=config.get('region_name'),
+                                  aws_access_key_id=config.get('aws_access_key_id'),
+                                  aws_secret_access_key=config.get('aws_secret_access_key')) as s3:
+            
+            # Set content type if provided, otherwise let S3 determine it
+            extra_args = {}
+            if content_type:
+                extra_args['ContentType'] = content_type
+            
+            # Add public read permission
+            extra_args['ACL'] = 'public-read'
+            
+            # Upload the file
+            await s3.put_object(
+                Bucket=bucket_name,
+                Key=key,
+                Body=file_content,
+                **extra_args
+            )
+            
+            # Generate the URL
+            url = f"https://{bucket_name}.s3.amazonaws.com/{key}"
+            logger.info(f"File uploaded to S3: {url}")
+            return url
+            
+    except Exception as e:
+        logger.error(f"Unexpected error uploading to S3 asynchronously: {str(e)}")
+        
+        # Fall back to local file for testing
+        local_url = f"file://{file_path}"
+        logger.warning(f"Using local file path instead of S3: {local_url}")
+        return local_url
+
+async def upload_image_to_s3_async(file_path):
+    """
+    Asynchronously upload an image file to S3 with appropriate content-type.
+    
+    Args:
+        file_path: Path to the image file
+        
+    Returns:
+        URL of the uploaded image
+    """
+    # Map file extensions to MIME types
+    extension_to_content_type = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+    
+    # Determine content type from file extension
+    file_extension = os.path.splitext(file_path)[1].lower()
+    content_type = extension_to_content_type.get(file_extension, 'application/octet-stream')
+    
+    return await upload_file_to_s3_async(file_path, content_type) 

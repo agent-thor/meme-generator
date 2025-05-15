@@ -7,7 +7,11 @@ import os
 import time
 from pathlib import Path
 import urllib.parse
+import aiohttp
+import aiofiles
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def download_image_from_url(url: str) -> str:
@@ -51,6 +55,47 @@ def download_image_from_url(url: str) -> str:
                 file.write(chunk)
         
         logger.info(f"Downloaded image from {url} to {save_path}")
+        return str(save_path)
+        
+    except Exception as e:
+        logger.error(f"Error downloading image from {url}: {e}")
+        raise
+
+async def download_image_from_url_async(url: str) -> str:
+    """
+    Asynchronously download an image from a URL and save it to the data directory.
+    
+    Args:
+        url: URL of the image
+        
+    Returns:
+        Path to the downloaded image
+    """
+    try:
+        # Create data directory if it doesn't exist
+        save_dir = Path(__file__).parent.parent / "data" / "downloads"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate a filename from the URL
+        filename = f"{hash(url)}.jpg"
+        
+        # Full path to save the image
+        save_path = save_dir / filename
+        
+        # Download the image asynchronously
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=10) as response:
+                response.raise_for_status()
+                
+                # Save the image asynchronously
+                async with aiofiles.open(save_path, 'wb') as file:
+                    while True:
+                        chunk = await response.content.read(8192)
+                        if not chunk:
+                            break
+                        await file.write(chunk)
+        
+        logger.info(f"Asynchronously downloaded image from {url} to {save_path}")
         return str(save_path)
         
     except Exception as e:
