@@ -106,6 +106,7 @@ def configure_routes(app):
         try:
             image_url = request.form.get('image_url')
             caption = request.form.get('caption', '')
+            print("Image urls", image_url)
             
             # Process the caption text carefully
             if caption:
@@ -143,17 +144,26 @@ def configure_routes(app):
             
             # Download image locally if needed
             if image_url:
-                # Download the image from S3 or remote URL
-                resp = requests.get(image_url, stream=True)
-                if resp.status_code == 200:
-                    # Save to user_query_meme with timestamp
-                    filename = f"{timestamp}_url_image.jpg"
-                    local_image_path = str(user_query_dir / filename)
-                    with open(local_image_path, 'wb') as f:
-                        for chunk in resp.iter_content(1024):
-                            f.write(chunk)
-                else:
-                    return jsonify({'error': 'Failed to download image from URL'}), 400
+                try:
+                    # Log the received URL for debugging
+                    logger.info(f"Received image URL: {image_url}")
+                    
+                    # Download the image from S3 or remote URL
+                    resp = requests.get(image_url, stream=True)
+                    if resp.status_code == 200:
+                        # Save to user_query_meme with timestamp
+                        filename = f"{timestamp}_url_image.jpg"
+                        local_image_path = str(user_query_dir / filename)
+                        with open(local_image_path, 'wb') as f:
+                            for chunk in resp.iter_content(1024):
+                                f.write(chunk)
+                        logger.info(f"Successfully downloaded image from URL to {local_image_path}")
+                    else:
+                        logger.error(f"Failed to download image from URL: {image_url}, status code: {resp.status_code}")
+                        return jsonify({'error': f'Failed to download image from URL: {resp.status_code}'}), 400
+                except Exception as e:
+                    logger.error(f"Error downloading image from URL: {image_url}, error: {str(e)}")
+                    return jsonify({'error': f'Error downloading image from URL: {str(e)}'}), 400
             elif 'image' in request.files:
                 # Handle direct file upload
                 file = request.files['image']
