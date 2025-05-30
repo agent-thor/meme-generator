@@ -79,9 +79,107 @@ class MemeService:
         # Final safety check
         return max(min_size, min(size, max_size))
     
+    def merge_nearby_text_regions(self, text_results, merge_threshold=50):
+        """
+        Merge nearby text regions that likely belong to the same text area.
+        
+        Args:
+            text_results: List of (bbox, text, confidence) from OCR
+            merge_threshold: Maximum distance between text regions to merge them
+            
+        Returns:
+            List of merged text regions
+        """
+        if not text_results:
+            return text_results
+        
+        # Sort by vertical position (y-coordinate)
+        sorted_results = sorted(text_results, key=lambda x: min(point[1] for point in x[0]))
+        
+        merged_regions = []
+        current_group = [sorted_results[0]]
+        
+        for i in range(1, len(sorted_results)):
+            current_bbox, current_text, current_conf = sorted_results[i]
+            prev_bbox, prev_text, prev_conf = current_group[-1]
+            
+            # Calculate vertical distance between current and previous text
+            current_y_min = min(point[1] for point in current_bbox)
+            current_y_max = max(point[1] for point in current_bbox)
+            prev_y_min = min(point[1] for point in prev_bbox)
+            prev_y_max = max(point[1] for point in prev_bbox)
+            
+            # Check if they overlap vertically or are close enough
+            vertical_distance = max(0, current_y_min - prev_y_max)
+            
+            # Also check horizontal overlap
+            current_x_min = min(point[0] for point in current_bbox)
+            current_x_max = max(point[0] for point in current_bbox)
+            prev_x_min = min(point[0] for point in prev_bbox)
+            prev_x_max = max(point[0] for point in prev_bbox)
+            
+            # Check if there's horizontal overlap or they're close
+            horizontal_overlap = not (current_x_max < prev_x_min or prev_x_max < current_x_min)
+            horizontal_distance = min(abs(current_x_min - prev_x_max), abs(prev_x_min - current_x_max))
+            
+            # Merge if they're close vertically and have some horizontal relationship
+            if (vertical_distance <= merge_threshold and horizontal_overlap) or \
+               (vertical_distance <= merge_threshold/2 and horizontal_distance <= merge_threshold):
+                current_group.append(sorted_results[i])
+            else:
+                # Process current group and start new group
+                if current_group:
+                    merged_regions.append(self._merge_text_group(current_group))
+                current_group = [sorted_results[i]]
+        
+        # Don't forget the last group
+        if current_group:
+            merged_regions.append(self._merge_text_group(current_group))
+        
+        logger.info(f"Merged {len(text_results)} text regions into {len(merged_regions)} major text areas")
+        
+        return merged_regions
+    
+    def _merge_text_group(self, text_group):
+        """
+        Merge a group of text detections into a single region.
+        
+        Args:
+            text_group: List of (bbox, text, confidence) that should be merged
+            
+        Returns:
+            Single (bbox, text, confidence) tuple representing the merged region
+        """
+        if len(text_group) == 1:
+            return text_group[0]
+        
+        # Combine all text with spaces
+        combined_text = " ".join([text for _, text, _ in text_group])
+        
+        # Calculate average confidence
+        avg_confidence = sum(conf for _, _, conf in text_group) / len(text_group)
+        
+        # Calculate bounding box that encompasses all regions
+        all_points = []
+        for bbox, _, _ in text_group:
+            all_points.extend(bbox)
+        
+        x_coords = [point[0] for point in all_points]
+        y_coords = [point[1] for point in all_points]
+        
+        # Create new bounding box
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+        
+        merged_bbox = [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]]
+        
+        logger.info(f"Merged {len(text_group)} text parts into: '{combined_text}' (confidence: {avg_confidence:.2f})")
+        
+        return (merged_bbox, combined_text, avg_confidence)
+
     def detect_text(self, image_path):
         """
-        Detect text in an image using EasyOCR.
+        Detect text in an image using EasyOCR with improved merging logic.
         
         Args:
             image_path: Path to the image file
@@ -101,9 +199,14 @@ class MemeService:
         # Filter results with good confidence
         filtered_results = [r for r in results if r[2] > 0.5]
         
-        logger.info(f"Detected {len(filtered_results)} text regions in image {image_path}")
+        logger.info(f"Initial OCR detected {len(filtered_results)} text regions")
         
-        return filtered_results, image
+        # Merge nearby text regions
+        merged_results = self.merge_nearby_text_regions(filtered_results, merge_threshold=50)
+        
+        logger.info(f"Final result: {len(merged_results)} major text areas")
+        
+        return merged_results, image
     
     def get_font(self, size, font_path=None):
         """
@@ -773,4 +876,248 @@ class MemeService:
             
         except Exception as e:
             logger.error(f"Error generating meme from clean image: {e}")
+            raise 
+
+    def normalize_bounding_boxes(self, bounding_boxes, source_image_shape):
+        """
+        Convert absolute bounding box coordinates to relative coordinates (0-1 range).
+        
+        Args:
+            bounding_boxes: List of bounding box detections with absolute coordinates
+            source_image_shape: Shape of the source image (height, width, channels)
+            
+        Returns:
+            List of normalized bounding boxes with relative coordinates
+        """
+        source_height, source_width = source_image_shape[:2]
+        normalized_boxes = []
+        
+        for bbox, text, confidence in bounding_boxes:
+            # Convert absolute coordinates to relative (0-1 range)
+            normalized_bbox = []
+            for point in bbox:
+                x_rel = point[0] / source_width
+                y_rel = point[1] / source_height
+                normalized_bbox.append([x_rel, y_rel])
+            
+            normalized_boxes.append((normalized_bbox, text, confidence))
+            
+        logger.info(f"Normalized {len(bounding_boxes)} bounding boxes to relative coordinates")
+        return normalized_boxes
+    
+    def scale_normalized_bboxes_to_target(self, normalized_bboxes, target_image_shape):
+        """
+        Scale normalized bounding boxes (0-1 range) to target image dimensions.
+        
+        Args:
+            normalized_bboxes: List of normalized bounding box detections
+            target_image_shape: Shape of the target image (height, width, channels)
+            
+        Returns:
+            List of bounding boxes scaled to target image dimensions
+        """
+        target_height, target_width = target_image_shape[:2]
+        scaled_boxes = []
+        
+        for bbox, text, confidence in normalized_bboxes:
+            # Convert relative coordinates back to absolute for target image
+            scaled_bbox = []
+            for point in bbox:
+                x_abs = point[0] * target_width
+                y_abs = point[1] * target_height
+                scaled_bbox.append([x_abs, y_abs])
+            
+            scaled_boxes.append((scaled_bbox, text, confidence))
+            
+        logger.info(f"Scaled {len(normalized_bboxes)} bounding boxes to target image dimensions ({target_width}x{target_height})")
+        return scaled_boxes
+
+    def apply_text_to_template_with_bboxes(self, template_path, text_list, bounding_boxes, 
+                                          source_image_path=None, output_path=None, text_color=(0, 0, 0), 
+                                          outline_color=(255, 255, 255), font_path=None):
+        """
+        Apply text to a template image using bounding boxes from another image.
+        
+        Args:
+            template_path: Path to the template image (I2)
+            text_list: List of text strings to apply
+            bounding_boxes: List of bounding box detections from original image (B1 from I1)
+            source_image_path: Path to the source image (I1) - needed for dimension scaling
+            output_path: Path where to save the result
+            text_color: Color of the text (RGB tuple)
+            outline_color: Color of the text outline (RGB tuple)
+            font_path: Optional path to custom font
+            
+        Returns:
+            Path to the generated meme
+        """
+        try:
+            # Load the template image
+            template_image = cv2.imread(template_path)
+            if template_image is None:
+                logger.error(f"Failed to read template image at {template_path}")
+                raise ValueError(f"Could not read template image at {template_path}")
+            
+            template_height, template_width = template_image.shape[:2]
+            logger.info(f"Template image dimensions: {template_width}x{template_height}")
+            
+            # If source image path is provided, normalize and scale bounding boxes
+            if source_image_path and os.path.exists(source_image_path):
+                source_image = cv2.imread(source_image_path)
+                if source_image is not None:
+                    source_height, source_width = source_image.shape[:2]
+                    logger.info(f"Source image dimensions: {source_width}x{source_height}")
+                    
+                    # Check if dimensions are different
+                    if source_width != template_width or source_height != template_height:
+                        logger.info("Image dimensions differ - normalizing and scaling bounding boxes")
+                        
+                        # Step 1: Normalize bounding boxes to relative coordinates (0-1)
+                        normalized_bboxes = self.normalize_bounding_boxes(bounding_boxes, source_image.shape)
+                        
+                        # Step 2: Scale normalized bounding boxes to template dimensions
+                        scaled_bboxes = self.scale_normalized_bboxes_to_target(normalized_bboxes, template_image.shape)
+                        
+                        # Use scaled bounding boxes
+                        bounding_boxes = scaled_bboxes
+                        logger.info("Successfully scaled bounding boxes to template dimensions")
+                    else:
+                        logger.info("Image dimensions match - using original bounding boxes")
+                else:
+                    logger.warning(f"Could not read source image at {source_image_path}, using original bounding boxes")
+            else:
+                logger.warning("No source image path provided, using original bounding boxes (may not align properly)")
+            
+            # Convert to PIL image for text drawing
+            pil_image = Image.fromarray(cv2.cvtColor(template_image, cv2.COLOR_BGR2RGB))
+            draw = ImageDraw.Draw(pil_image)
+            
+            logger.info(f"Applying text to template using {len(bounding_boxes)} bounding boxes")
+            
+            # Apply text to template using (possibly scaled) bounding boxes
+            for i, detection in enumerate(bounding_boxes):
+                if i < len(text_list) and text_list[i]:
+                    bbox, original_text, confidence = detection
+                    new_text = text_list[i]
+                    
+                    logger.info(f"Replacing '{original_text}' with '{new_text}' (confidence: {confidence:.2f})")
+                    
+                    # Calculate bounding box dimensions
+                    x_min = min(point[0] for point in bbox)
+                    y_min = min(point[1] for point in bbox)
+                    x_max = max(point[0] for point in bbox)
+                    y_max = max(point[1] for point in bbox)
+                    
+                    bbox_width = x_max - x_min
+                    bbox_height = y_max - y_min
+                    
+                    logger.info(f"Scaled bounding box: ({x_min:.1f}, {y_min:.1f}) to ({x_max:.1f}, {y_max:.1f}), size: {bbox_width:.1f}x{bbox_height:.1f}")
+                    
+                    # Calculate optimal font size for this bounding box
+                    font_size = self.calculate_optimal_font_size(
+                        new_text, bbox_width, bbox_height * 1.2, min_size=10, max_size=100
+                    )
+                    
+                    # Get font
+                    font = self.get_font(font_size, font_path)
+                    
+                    # Get text dimensions
+                    if hasattr(font, "getbbox"):
+                        text_bbox = font.getbbox(new_text)
+                        text_width = text_bbox[2] - text_bbox[0]
+                        text_height = text_bbox[3] - text_bbox[1]
+                    else:
+                        text_width, text_height = font.getsize(new_text)
+                    
+                    # Center text within the bounding box
+                    text_x = x_min + (bbox_width - text_width) / 2
+                    text_y = y_min + (bbox_height - text_height) / 2
+                    
+                    # Draw text with outline
+                    self._draw_text_with_outline_at_position(
+                        draw, new_text, font, int(text_x), int(text_y),
+                        text_color=text_color, outline_color=outline_color
+                    )
+                    
+                    logger.info(f"Applied text '{new_text}' at position ({int(text_x)}, {int(text_y)}) with font size {font_size}")
+            
+            # Handle extra text that doesn't have corresponding bounding boxes
+            if len(text_list) > len(bounding_boxes):
+                logger.info(f"Handling {len(text_list) - len(bounding_boxes)} extra text parts")
+                
+                # Place remaining text as top/bottom text
+                remaining_texts = text_list[len(bounding_boxes):]
+                
+                # First extra text goes to top
+                if len(remaining_texts) > 0:
+                    top_text = remaining_texts[0]
+                    font_size = self.calculate_optimal_font_size(
+                        top_text, pil_image.width, 100, min_size=20, max_size=80
+                    )
+                    font = self.get_font(font_size, font_path)
+                    
+                    # Get text dimensions
+                    if hasattr(font, "getbbox"):
+                        text_bbox = font.getbbox(top_text)
+                        text_width = text_bbox[2] - text_bbox[0]
+                        text_height = text_bbox[3] - text_bbox[1]
+                    else:
+                        text_width, text_height = font.getsize(top_text)
+                    
+                    # Position at top
+                    text_x = (pil_image.width - text_width) / 2
+                    text_y = 20
+                    
+                    self._draw_text_with_outline_at_position(
+                        draw, top_text, font, int(text_x), int(text_y),
+                        text_color=text_color, outline_color=outline_color
+                    )
+                    
+                    logger.info(f"Added extra text '{top_text}' at top")
+                
+                # Last extra text goes to bottom
+                if len(remaining_texts) > 1:
+                    bottom_text = remaining_texts[-1]
+                    font_size = self.calculate_optimal_font_size(
+                        bottom_text, pil_image.width, 100, min_size=20, max_size=80
+                    )
+                    font = self.get_font(font_size, font_path)
+                    
+                    # Get text dimensions
+                    if hasattr(font, "getbbox"):
+                        text_bbox = font.getbbox(bottom_text)
+                        text_width = text_bbox[2] - text_bbox[0]
+                        text_height = text_bbox[3] - text_bbox[1]
+                    else:
+                        text_width, text_height = font.getsize(bottom_text)
+                    
+                    # Position at bottom
+                    text_x = (pil_image.width - text_width) / 2
+                    text_y = pil_image.height - text_height - 20
+                    
+                    self._draw_text_with_outline_at_position(
+                        draw, bottom_text, font, int(text_x), int(text_y),
+                        text_color=text_color, outline_color=outline_color
+                    )
+                    
+                    logger.info(f"Added extra text '{bottom_text}' at bottom")
+            
+            # Convert back to OpenCV format
+            result_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+            
+            # Generate output path if not provided
+            if output_path is None:
+                data_dir = Path(__file__).parent.parent / "data" / "generated_memes"
+                data_dir.mkdir(parents=True, exist_ok=True)
+                output_filename = f"template_bbox_meme_{os.path.basename(template_path)}"
+                output_path = str(data_dir / output_filename)
+            
+            # Save the result
+            cv2.imwrite(output_path, result_image)
+            logger.info(f"Generated template meme with bounding boxes saved to {output_path}")
+            
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Error applying text to template with bounding boxes: {e}")
             raise 
