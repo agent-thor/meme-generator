@@ -181,14 +181,11 @@ def configure_routes(app):
             )
             logger.info(f"Text cleaned, saved to: {cleaned_image_path}")
             
-            # Then search for similar images in the meme_templates folder using the cleaned image
-            # logger.info(f"Searching for similar templates in database")
-            # similar_path, similarity = vector_db.search(cleaned_image_path, threshold=0.8)
-            
             # Log the top 5 most similar images
             try:
-                # Get top 5 similar images with scores
+                # Get top 5 similar images with scores using cleaned image
                 top_results = vector_db.search_top_k(cleaned_image_path, k=5)
+                print(top_results)
                 logger.info("Top 5 similar images:")
                 for i, (path, score) in enumerate(top_results):
                     logger.info(f"  Simailr image {i+1}. {path}: {score*100:.2f}%")
@@ -200,32 +197,66 @@ def configure_routes(app):
                 else:
                     similar_path = None
                     similarity = 0
-                    logger.info(f"No template found with similarity >= 50%")
+                    logger.info(f"No template found with similarity >= 80%")
             except Exception as e:
                 logger.warning(f"Error getting top 5 similar images: {e}")
                 similar_path = None
                 similarity = 0
             
-            # Test if similar template exists
-            if similar_path and os.path.exists(similar_path):
-                # Use white box meme approach with template from meme_templates
-                logger.info(f"Generating meme from template: {similar_path}")
+            # Check if template was found
+            if not similar_path or not os.path.exists(similar_path):
+                logger.error(f"No template found in database. Path: {similar_path}")
+                logger.error(f"Path exists check: {os.path.exists(similar_path) if similar_path else 'No path'}")
+                logger.error(f"Current working directory: {os.getcwd()}")
+                
+                # Try to find the template in the current project's meme_templates directory
+                if similar_path:
+                    template_filename = os.path.basename(similar_path)
+                    local_template_path = str(meme_templates_dir / template_filename)
+                    logger.info(f"Trying local template path: {local_template_path}")
+                    
+                    if os.path.exists(local_template_path):
+                        similar_path = local_template_path
+                        logger.info(f"Found template in local directory: {similar_path}")
+                    else:
+                        logger.error(f"Template not found in local directory either: {local_template_path}")
+                        return jsonify({'error': 'No template found for this image'}), 404
+                else:
+                    return jsonify({'error': 'No template found for this image'}), 404
+            
+            # Detect text bounding boxes from original image I1
+            logger.info(f"Detecting text bounding boxes from original image: {local_image_path}")
+            text_results, _ = meme_service.detect_text(local_image_path)
+            logger.info("Detected text regions:")
+            for i, (bbox, text, confidence) in enumerate(text_results):
+                logger.info(f"Region {i+1}: '{text}', Confidence: {confidence:.2f}")
+                logger.info(f"Bounding box coordinates: {bbox}")
+            
+            if text_results:
+                # Case 1: Text detected in I1 - use bounding boxes B1 on template I2
+                logger.info(f"Found {len(text_results)} text regions in original image")
+                logger.info(f"Applying caption to template using detected bounding boxes")
+                
+                # Use custom method to apply text to template using bounding boxes from I1
+                meme_path = meme_service.apply_text_to_template_with_bboxes(
+                    template_path=similar_path,  # I2 (template)
+                    text_list=text_parts,       # Caption parts
+                    bounding_boxes=text_results, # B1 (from I1)
+                    source_image_path=local_image_path  # I1 (source image for scaling)
+                )
+                from_template = True
+                logger.info(f"Applied {len(text_parts)} caption parts to template using bounding boxes")
+                
+            else:
+                # Case 2: No text detected in I1 - use traditional top/bottom on template I2
+                logger.info("No text detected in original image")
+                logger.info("Using traditional top/bottom text placement on template")
+                
                 meme_path = meme_service.generate_white_box_meme(
                     similar_path, top_text, bottom_text
                 )
                 from_template = True
-                logger.info(f"DEBUG - Using template: from_template={from_template}")
-            else:
-                # Use the cleaned image with new method to avoid redundant cleaning
-                logger.info(f"No similar template found, generating from cleaned image")
-                # Pass all text parts to handle properly
-                meme_path = meme_service.generate_meme_from_clean(
-                    cleaned_image_path, 
-                    text_parts,  # Pass all parsed text parts
-                    detect_text_areas=True
-                )
-                from_template = False
-                logger.info(f"DEBUG - Not using template: from_template={from_template}")
+                logger.info(f"Applied top/bottom text to template")
             
             # Get the similarity score
             similarity_score = float(similarity * 100) if from_template else 0  # Convert to percentage
