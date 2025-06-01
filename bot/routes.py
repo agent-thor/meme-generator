@@ -21,6 +21,19 @@ from utils import download_image_from_url
 
 logger = logging.getLogger(__name__)
 
+def fix_vector_db_path(old_path):
+    """Fix old vector database paths to current project paths."""
+    project_base = os.getenv('PROJECT_BASE_PATH', '/Users/krishnayadav/Documents/forgex/memezap/memezap-backend')
+    
+    # Replace old meme-generator paths with current project path
+    if '/meme-generator/' in old_path:
+        # Extract the relative path after meme-generator
+        relative_path = old_path.split('/meme-generator/')[-1]
+        new_path = os.path.join(project_base, relative_path)
+        return new_path
+    
+    return old_path
+
 def configure_routes(app):
     """Configure Flask routes."""
     meme_engine = MemeService()
@@ -193,6 +206,11 @@ def configure_routes(app):
                 # Use the top result if available and score is high enough
                 if top_results and top_results[0][1] >= 0.8:
                     similar_path, similarity = top_results[0]
+                    
+                    # Fix path if it contains old project directory
+                    if '/meme-generator/' in similar_path:
+                        similar_path = fix_vector_db_path(similar_path)
+                    
                     logger.info(f"Using top similar image: {similar_path} with score: {similarity*100:.2f}%")
                 else:
                     similar_path = None
@@ -205,58 +223,184 @@ def configure_routes(app):
             
             # Check if template was found
             if not similar_path or not os.path.exists(similar_path):
-                logger.error(f"No template found in database. Path: {similar_path}")
-                logger.error(f"Path exists check: {os.path.exists(similar_path) if similar_path else 'No path'}")
-                logger.error(f"Current working directory: {os.getcwd()}")
+                logger.info(f"No template found in database.")
                 
-                # Try to find the template in the current project's meme_templates directory
-                if similar_path:
-                    template_filename = os.path.basename(similar_path)
-                    local_template_path = str(meme_templates_dir / template_filename)
-                    logger.info(f"Trying local template path: {local_template_path}")
+                # No template found - detect text in original image first
+                logger.info(f"Detecting text bounding boxes from original image: {local_image_path}")
+                text_results, _ = meme_service.detect_text(local_image_path)
+                logger.info("Detected text regions:")
+                for i, (bbox, text, confidence) in enumerate(text_results):
+                    logger.info(f"Region {i+1}: '{text}', Confidence: {confidence:.2f}")
+                    logger.info(f"Bounding box coordinates: {bbox}")
+                
+                if text_results:
+                    # Text detected - use existing bounding boxes on cleaned image
+                    logger.info(f"Found {len(text_results)} text regions in original image")
+                    logger.info(f"Applying caption to cleaned image using detected bounding boxes")
                     
-                    if os.path.exists(local_template_path):
-                        similar_path = local_template_path
-                        logger.info(f"Found template in local directory: {similar_path}")
-                    else:
-                        logger.error(f"Template not found in local directory either: {local_template_path}")
-                        return jsonify({'error': 'No template found for this image'}), 404
+                    meme_path = meme_service.apply_text_to_template_with_bboxes(
+                        template_path=cleaned_image_path,  # Use cleaned image as template
+                        text_list=text_parts,             # Caption parts
+                        bounding_boxes=text_results,      # Detected bounding boxes from original
+                        source_image_path=local_image_path # Original image for reference
+                    )
+                    from_template = False
+                    similarity = 0
+                    logger.info(f"Applied {len(text_parts)} caption parts using detected bounding boxes")
+                    
                 else:
-                    return jsonify({'error': 'No template found for this image'}), 404
+                    # No text detected - try OpenAI-generated bounding boxes
+                    logger.info("No text detected in original image. Trying OpenAI-generated bounding boxes.")
+                    
+                    try:
+                        logger.info("Attempting to generate bounding boxes using OpenAI")
+                        
+                        # Check if we have a similar template from the search (even if below 80% threshold)
+                        if top_results and len(top_results) > 0:
+                            # Use the most similar template found for OpenAI bounding box generation
+                            template_for_ai = top_results[0][0]  # Best match template path
+                            template_similarity = top_results[0][1]
+                            
+                            # Fix path if it contains old project directory
+                            if '/meme-generator/' in template_for_ai:
+                                template_for_ai = fix_vector_db_path(template_for_ai)
+                            
+                            logger.info(f"Using template from similarity search for OpenAI: {template_for_ai} (similarity: {template_similarity*100:.2f}%)")
+                            
+                            # Parsed text parts passed to OpenAI Vision API
+                            ai_bounding_boxes = meme_service.generate_bounding_boxes_with_openai(
+                                template_for_ai, text_parts  # Clean list of text parts
+                            )
+                            
+                            if ai_bounding_boxes:
+                                logger.info(f"Generated {len(ai_bounding_boxes)} bounding boxes using OpenAI Vision API with template")
+                                
+                                # Use the template directly with AI-generated bounding boxes (no rescaling)
+                                meme_path = meme_service.apply_text_to_template_with_bboxes(
+                                    template_path=template_for_ai,     # Use template found from similarity
+                                    text_list=text_parts,             # Caption parts
+                                    bounding_boxes=ai_bounding_boxes,  # AI-generated bounding boxes
+                                    source_image_path=None            # No rescaling needed - boxes are for template
+                                )
+                                from_template = True  # We are using a template
+                                similarity = template_similarity
+                                logger.info(f"Applied {len(text_parts)} caption parts using AI-generated bounding boxes on template (no rescaling)")
+                            else:
+                                logger.warning("OpenAI Vision API failed to generate bounding boxes with template, using template with traditional method")
+                                # Use template with traditional top/bottom text
+                                meme_path = meme_service.generate_white_box_meme(
+                                    template_for_ai, top_text, bottom_text
+                                )
+                                from_template = True
+                                similarity = template_similarity
+                                logger.info("Generated meme using traditional top/bottom text placement on template")
+                        else:
+                            # No template available, use cleaned image
+                            logger.info("No template available from similarity search, using cleaned image")
+                            ai_bounding_boxes = meme_service.generate_bounding_boxes_with_openai(
+                                local_image_path, text_parts
+                            )
+                            
+                            if ai_bounding_boxes:
+                                logger.info(f"Generated {len(ai_bounding_boxes)} bounding boxes using OpenAI")
+                                
+                                # Use the cleaned image as template and apply AI-generated bounding boxes
+                                meme_path = meme_service.apply_text_to_template_with_bboxes(
+                                    template_path=cleaned_image_path,  # Use cleaned image as template
+                                    text_list=text_parts,             # Caption parts
+                                    bounding_boxes=ai_bounding_boxes,  # AI-generated bounding boxes
+                                    source_image_path=local_image_path # Original image for reference
+                                )
+                                from_template = False
+                                similarity = 0
+                                logger.info(f"Applied {len(text_parts)} caption parts using AI-generated bounding boxes")
+                            else:
+                                logger.warning("OpenAI failed to generate bounding boxes, falling back to traditional method")
+                                # Fallback to traditional method
+                                meme_path = meme_service.generate_meme_from_clean(
+                                    cleaned_image_path, text_parts
+                                )
+                                from_template = False
+                                similarity = 0
+                                logger.info("Generated meme using traditional top/bottom text placement")
+                            
+                    except Exception as e:
+                        logger.warning(f"OpenAI bounding box generation failed: {e}")
+                        # Fallback to traditional method
+                        meme_path = meme_service.generate_meme_from_clean(
+                            cleaned_image_path, text_parts
+                        )
+                        from_template = False
+                        similarity = 0
+                        logger.info("Generated meme using traditional top/bottom text placement")
             
-            # Detect text bounding boxes from original image I1
-            logger.info(f"Detecting text bounding boxes from original image: {local_image_path}")
-            text_results, _ = meme_service.detect_text(local_image_path)
-            logger.info("Detected text regions:")
-            for i, (bbox, text, confidence) in enumerate(text_results):
-                logger.info(f"Region {i+1}: '{text}', Confidence: {confidence:.2f}")
-                logger.info(f"Bounding box coordinates: {bbox}")
-            
-            if text_results:
-                # Case 1: Text detected in I1 - use bounding boxes B1 on template I2
-                logger.info(f"Found {len(text_results)} text regions in original image")
-                logger.info(f"Applying caption to template using detected bounding boxes")
-                
-                # Use custom method to apply text to template using bounding boxes from I1
-                meme_path = meme_service.apply_text_to_template_with_bboxes(
-                    template_path=similar_path,  # I2 (template)
-                    text_list=text_parts,       # Caption parts
-                    bounding_boxes=text_results, # B1 (from I1)
-                    source_image_path=local_image_path  # I1 (source image for scaling)
-                )
-                from_template = True
-                logger.info(f"Applied {len(text_parts)} caption parts to template using bounding boxes")
-                
             else:
-                # Case 2: No text detected in I1 - use traditional top/bottom on template I2
-                logger.info("No text detected in original image")
-                logger.info("Using traditional top/bottom text placement on template")
+                # Template found - proceed with existing logic
+                logger.info(f"Found template: {similar_path}")
                 
-                meme_path = meme_service.generate_white_box_meme(
-                    similar_path, top_text, bottom_text
-                )
-                from_template = True
-                logger.info(f"Applied top/bottom text to template")
+                # Detect text bounding boxes from original image I1
+                logger.info(f"Detecting text bounding boxes from original image: {local_image_path}")
+                text_results, _ = meme_service.detect_text(local_image_path)
+                logger.info("Detected text regions:")
+                for i, (bbox, text, confidence) in enumerate(text_results):
+                    logger.info(f"Region {i+1}: '{text}', Confidence: {confidence:.2f}")
+                    logger.info(f"Bounding box coordinates: {bbox}")
+                
+                if text_results:
+                    # Case 1: Text detected in I1 - use bounding boxes B1 on template I2
+                    logger.info(f"Found {len(text_results)} text regions in original image")
+                    logger.info(f"Applying caption to template using detected bounding boxes")
+                    
+                    # Use custom method to apply text to template using bounding boxes from I1
+                    meme_path = meme_service.apply_text_to_template_with_bboxes(
+                        template_path=similar_path,  # I2 (template)
+                        text_list=text_parts,       # Caption parts
+                        bounding_boxes=text_results, # B1 (from I1)
+                        source_image_path=local_image_path  # I1 (source image for scaling)
+                    )
+                    from_template = True
+                    logger.info(f"Applied {len(text_parts)} caption parts to template using bounding boxes")
+                    
+                else:
+                    # Case 2: No text detected in I1 - try OpenAI for template placement
+                    logger.info("No text detected in original image. Trying OpenAI-generated bounding boxes for template.")
+                    
+                    try:
+                        logger.info("Attempting to generate bounding boxes using OpenAI for template")
+                        ai_bounding_boxes = meme_service.generate_bounding_boxes_with_openai(
+                            similar_path, text_parts  # Use parsed text parts instead of raw caption
+                        )
+                        
+                        if ai_bounding_boxes:
+                            logger.info(f"Generated {len(ai_bounding_boxes)} bounding boxes using OpenAI for template")
+                            
+                            # Use template with AI-generated bounding boxes (no rescaling)
+                            meme_path = meme_service.apply_text_to_template_with_bboxes(
+                                template_path=similar_path,       # Template image
+                                text_list=text_parts,             # Caption parts
+                                bounding_boxes=ai_bounding_boxes, # AI-generated bounding boxes
+                                source_image_path=None            # No rescaling needed - boxes are for template
+                            )
+                            from_template = True
+                            logger.info(f"Applied {len(text_parts)} caption parts to template using AI-generated bounding boxes (no rescaling)")
+                            
+                        else:
+                            logger.warning("OpenAI failed to generate bounding boxes for template, using traditional top/bottom")
+                            # Fallback to traditional top/bottom on template
+                            meme_path = meme_service.generate_white_box_meme(
+                                similar_path, top_text, bottom_text
+                            )
+                            from_template = True
+                            logger.info(f"Applied top/bottom text to template")
+                            
+                    except Exception as e:
+                        logger.warning(f"OpenAI bounding box generation failed for template: {e}")
+                        # Fallback to traditional top/bottom on template
+                        meme_path = meme_service.generate_white_box_meme(
+                            similar_path, top_text, bottom_text
+                        )
+                        from_template = True
+                        logger.info(f"Applied top/bottom text to template")
             
             # Get the similarity score
             similarity_score = float(similarity * 100) if from_template else 0  # Convert to percentage

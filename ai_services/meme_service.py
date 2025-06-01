@@ -10,6 +10,15 @@ import os
 from pathlib import Path
 import sys
 import shutil
+import openai
+from openai import OpenAI
+import json
+import yaml
+from dotenv import load_dotenv
+import time
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +30,17 @@ class MemeService:
         # Initialize OCR reader (lazily to save memory)
         self._ocr_reader = None
         self.outline_thickness = 3
+        
+        # Set up directories
+        self.generated_memes_dir = Path(__file__).parent.parent / "data" / "generated_memes"
+        self.generated_memes_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize OpenAI
+        self.openai_client = None
+        if os.getenv('OPENAI_API_KEY'):
+            self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+        else:
+            logger.warning("OpenAI API key not found. AI-generated bounding boxes will not be available.")
     
     @property
     def ocr_reader(self):
@@ -933,191 +953,327 @@ class MemeService:
         return scaled_boxes
 
     def apply_text_to_template_with_bboxes(self, template_path, text_list, bounding_boxes, 
-                                          source_image_path=None, output_path=None, text_color=(0, 0, 0), 
-                                          outline_color=(255, 255, 255), font_path=None):
+                                      source_image_path=None, output_path=None, text_color=(0, 0, 0), 
+                                      outline_color=(255, 255, 255), font_path=None):
         """
-        Apply text to a template image using bounding boxes from another image.
+        Apply text to a template image using provided bounding boxes.
         
         Args:
-            template_path: Path to the template image (I2)
-            text_list: List of text strings to apply
-            bounding_boxes: List of bounding box detections from original image (B1 from I1)
-            source_image_path: Path to the source image (I1) - needed for dimension scaling
-            output_path: Path where to save the result
-            text_color: Color of the text (RGB tuple)
-            outline_color: Color of the text outline (RGB tuple)
-            font_path: Optional path to custom font
+            template_path: Path to the template image
+            text_list: List of text strings to place
+            bounding_boxes: List of bounding box coordinates (either from OCR or OpenAI)
+            source_image_path: Path to source image (for scaling if needed, None if no scaling)
+            output_path: Output path for the generated meme
+            text_color: RGB tuple for text color
+            outline_color: RGB tuple for outline color
+            font_path: Path to custom font file
             
         Returns:
             Path to the generated meme
         """
         try:
-            # Load the template image
-            template_image = cv2.imread(template_path)
-            if template_image is None:
-                logger.error(f"Failed to read template image at {template_path}")
-                raise ValueError(f"Could not read template image at {template_path}")
+            # Load template image
+            template_image = Image.open(template_path).convert('RGB')
+            template_width, template_height = template_image.size
             
-            template_height, template_width = template_image.shape[:2]
-            logger.info(f"Template image dimensions: {template_width}x{template_height}")
+            # Create a copy for drawing
+            meme_image = template_image.copy()
+            draw = ImageDraw.Draw(meme_image)
             
-            # If source image path is provided, normalize and scale bounding boxes
-            if source_image_path and os.path.exists(source_image_path):
-                source_image = cv2.imread(source_image_path)
-                if source_image is not None:
-                    source_height, source_width = source_image.shape[:2]
-                    logger.info(f"Source image dimensions: {source_width}x{source_height}")
-                    
-                    # Check if dimensions are different
-                    if source_width != template_width or source_height != template_height:
-                        logger.info("Image dimensions differ - normalizing and scaling bounding boxes")
-                        
-                        # Step 1: Normalize bounding boxes to relative coordinates (0-1)
-                        normalized_bboxes = self.normalize_bounding_boxes(bounding_boxes, source_image.shape)
-                        
-                        # Step 2: Scale normalized bounding boxes to template dimensions
-                        scaled_bboxes = self.scale_normalized_bboxes_to_target(normalized_bboxes, template_image.shape)
-                        
-                        # Use scaled bounding boxes
-                        bounding_boxes = scaled_bboxes
-                        logger.info("Successfully scaled bounding boxes to template dimensions")
-                    else:
-                        logger.info("Image dimensions match - using original bounding boxes")
-                else:
-                    logger.warning(f"Could not read source image at {source_image_path}, using original bounding boxes")
+            logger.info(f"Template dimensions: {template_width}x{template_height}")
+            logger.info(f"Processing {len(text_list)} text parts with {len(bounding_boxes)} bounding boxes")
+            
+            # Check if we need to scale bounding boxes
+            need_scaling = source_image_path and source_image_path != template_path
+            
+            if need_scaling:
+                # Load source image to get dimensions for scaling
+                source_image = Image.open(source_image_path)
+                source_width, source_height = source_image.size
+                logger.info(f"Source image dimensions: {source_width}x{source_height}")
+                
+                # Normalize bounding boxes from source image coordinates
+                normalized_bboxes = self.normalize_bounding_boxes(bounding_boxes, (source_height, source_width))
+                
+                # Scale to template dimensions
+                scaled_bboxes = self.scale_normalized_bboxes_to_target(normalized_bboxes, (template_height, template_width))
+                logger.info("Scaled bounding boxes from source to template dimensions")
             else:
-                logger.warning("No source image path provided, using original bounding boxes (may not align properly)")
+                # Use bounding boxes directly (already for template image)
+                scaled_bboxes = bounding_boxes
+                logger.info("Using bounding boxes directly for template (no scaling needed)")
             
-            # Convert to PIL image for text drawing
-            pil_image = Image.fromarray(cv2.cvtColor(template_image, cv2.COLOR_BGR2RGB))
-            draw = ImageDraw.Draw(pil_image)
-            
-            logger.info(f"Applying text to template using {len(bounding_boxes)} bounding boxes")
-            
-            # Apply text to template using (possibly scaled) bounding boxes
-            for i, detection in enumerate(bounding_boxes):
-                if i < len(text_list) and text_list[i]:
-                    bbox, original_text, confidence = detection
-                    new_text = text_list[i]
-                    
-                    logger.info(f"Replacing '{original_text}' with '{new_text}' (confidence: {confidence:.2f})")
-                    
-                    # Calculate bounding box dimensions
-                    x_min = min(point[0] for point in bbox)
-                    y_min = min(point[1] for point in bbox)
-                    x_max = max(point[0] for point in bbox)
-                    y_max = max(point[1] for point in bbox)
-                    
-                    bbox_width = x_max - x_min
-                    bbox_height = y_max - y_min
-                    
-                    logger.info(f"Scaled bounding box: ({x_min:.1f}, {y_min:.1f}) to ({x_max:.1f}, {y_max:.1f}), size: {bbox_width:.1f}x{bbox_height:.1f}")
-                    
+            # Apply text to each bounding box
+            for i, (text_part, bbox_data) in enumerate(zip(text_list, scaled_bboxes)):
+                if i >= len(scaled_bboxes):
+                    logger.warning(f"Not enough bounding boxes for text part {i+1}: '{text_part}'")
+                    continue
+                
+                # Extract bounding box coordinates and font size
+                openai_font_size = None
+                if isinstance(bbox_data, tuple):
+                    if len(bbox_data) >= 4:
+                        # Format: (bbox_coords, text, confidence, font_size) from OpenAI
+                        bbox_coords = bbox_data[0]
+                        openai_font_size = bbox_data[3]
+                    elif len(bbox_data) >= 1:
+                        # Format: (bbox_coords, text, confidence) from OCR
+                        bbox_coords = bbox_data[0]
+                else:
+                    # Direct bbox coordinates
+                    bbox_coords = bbox_data
+                
+                if not bbox_coords or len(bbox_coords) != 4:
+                    logger.warning(f"Invalid bounding box for text part {i+1}: {bbox_coords}")
+                    continue
+                
+                # Calculate bounding box dimensions
+                x_coords = [point[0] for point in bbox_coords]
+                y_coords = [point[1] for point in bbox_coords]
+                
+                bbox_left = min(x_coords)
+                bbox_top = min(y_coords)
+                bbox_right = max(x_coords)
+                bbox_bottom = max(y_coords)
+                
+                bbox_width = bbox_right - bbox_left
+                bbox_height = bbox_bottom - bbox_top
+                
+                logger.info(f"Text {i+1}: '{text_part}' -> Box: ({bbox_left}, {bbox_top}, {bbox_right}, {bbox_bottom})")
+                
+                # Use OpenAI suggested font size if available, otherwise calculate optimal size
+                if openai_font_size:
+                    font_size = int(openai_font_size)
+                    logger.info(f"Using OpenAI suggested font size: {font_size} for text '{text_part}'")
+                else:
                     # Calculate optimal font size for this bounding box
                     font_size = self.calculate_optimal_font_size(
-                        new_text, bbox_width, bbox_height * 1.2, min_size=10, max_size=100
+                        text_part, bbox_width, bbox_height, 
+                        default_size=40, min_size=20, max_size=80
                     )
-                    
-                    # Get font
-                    font = self.get_font(font_size, font_path)
-                    
-                    # Get text dimensions
-                    if hasattr(font, "getbbox"):
-                        text_bbox = font.getbbox(new_text)
-                        text_width = text_bbox[2] - text_bbox[0]
-                        text_height = text_bbox[3] - text_bbox[1]
-                    else:
-                        text_width, text_height = font.getsize(new_text)
-                    
-                    # Center text within the bounding box
-                    text_x = x_min + (bbox_width - text_width) / 2
-                    text_y = y_min + (bbox_height - text_height) / 2
-                    
-                    # Draw text with outline
-                    self._draw_text_with_outline_at_position(
-                        draw, new_text, font, int(text_x), int(text_y),
-                        text_color=text_color, outline_color=outline_color
-                    )
-                    
-                    logger.info(f"Applied text '{new_text}' at position ({int(text_x)}, {int(text_y)}) with font size {font_size}")
-            
-            # Handle extra text that doesn't have corresponding bounding boxes
-            if len(text_list) > len(bounding_boxes):
-                logger.info(f"Handling {len(text_list) - len(bounding_boxes)} extra text parts")
+                    logger.info(f"Calculated font size: {font_size} for text '{text_part}'")
                 
-                # Place remaining text as top/bottom text
-                remaining_texts = text_list[len(bounding_boxes):]
+                # Get font
+                font = self.get_font(font_size, font_path)
                 
-                # First extra text goes to top
-                if len(remaining_texts) > 0:
-                    top_text = remaining_texts[0]
-                    font_size = self.calculate_optimal_font_size(
-                        top_text, pil_image.width, 100, min_size=20, max_size=80
-                    )
-                    font = self.get_font(font_size, font_path)
-                    
-                    # Get text dimensions
-                    if hasattr(font, "getbbox"):
-                        text_bbox = font.getbbox(top_text)
-                        text_width = text_bbox[2] - text_bbox[0]
-                        text_height = text_bbox[3] - text_bbox[1]
-                    else:
-                        text_width, text_height = font.getsize(top_text)
-                    
-                    # Position at top
-                    text_x = (pil_image.width - text_width) / 2
-                    text_y = 20
-                    
-                    self._draw_text_with_outline_at_position(
-                        draw, top_text, font, int(text_x), int(text_y),
-                        text_color=text_color, outline_color=outline_color
-                    )
-                    
-                    logger.info(f"Added extra text '{top_text}' at top")
+                # Calculate text position (center of bounding box)
+                text_bbox = draw.textbbox((0, 0), text_part, font=font)
+                text_width = text_bbox[2] - text_bbox[0]
+                text_height = text_bbox[3] - text_bbox[1]
                 
-                # Last extra text goes to bottom
-                if len(remaining_texts) > 1:
-                    bottom_text = remaining_texts[-1]
-                    font_size = self.calculate_optimal_font_size(
-                        bottom_text, pil_image.width, 100, min_size=20, max_size=80
-                    )
-                    font = self.get_font(font_size, font_path)
-                    
-                    # Get text dimensions
-                    if hasattr(font, "getbbox"):
-                        text_bbox = font.getbbox(bottom_text)
-                        text_width = text_bbox[2] - text_bbox[0]
-                        text_height = text_bbox[3] - text_bbox[1]
-                    else:
-                        text_width, text_height = font.getsize(bottom_text)
-                    
-                    # Position at bottom
-                    text_x = (pil_image.width - text_width) / 2
-                    text_y = pil_image.height - text_height - 20
-                    
-                    self._draw_text_with_outline_at_position(
-                        draw, bottom_text, font, int(text_x), int(text_y),
-                        text_color=text_color, outline_color=outline_color
-                    )
-                    
-                    logger.info(f"Added extra text '{bottom_text}' at bottom")
-            
-            # Convert back to OpenCV format
-            result_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-            
-            # Generate output path if not provided
-            if output_path is None:
-                data_dir = Path(__file__).parent.parent / "data" / "generated_memes"
-                data_dir.mkdir(parents=True, exist_ok=True)
-                output_filename = f"template_bbox_meme_{os.path.basename(template_path)}"
-                output_path = str(data_dir / output_filename)
+                # Center text in bounding box
+                text_x = bbox_left + (bbox_width - text_width) // 2
+                text_y = bbox_top + (bbox_height - text_height) // 2
+                
+                # Ensure text stays within image bounds
+                text_x = max(0, min(text_x, template_width - text_width))
+                text_y = max(0, min(text_y, template_height - text_height))
+                
+                # Draw text with outline
+                self._draw_text_with_outline_at_position(
+                    draw, text_part, font, text_x, text_y, text_color, outline_color
+                )
+                
+                logger.info(f"Applied text '{text_part}' at position ({text_x}, {text_y}) with font size {font_size}")
             
             # Save the result
-            cv2.imwrite(output_path, result_image)
-            logger.info(f"Generated template meme with bounding boxes saved to {output_path}")
+            if not output_path:
+                timestamp = int(time.time())
+                output_filename = f"meme_with_bboxes_{timestamp}.jpg"
+                output_path = str(self.generated_memes_dir / output_filename)
+            
+            meme_image.save(output_path, 'JPEG', quality=95)
+            logger.info(f"Generated meme with bounding boxes saved to {output_path}")
             
             return output_path
             
         except Exception as e:
             logger.error(f"Error applying text to template with bounding boxes: {e}")
+            raise
+
+    def get_image_dimensions(self, image_path):
+        """
+        Get the dimensions of an image.
+        
+        Args:
+            image_path: Path to the image file
+            
+        Returns:
+            Tuple of (width, height) in pixels
+        """
+        try:
+            image = cv2.imread(image_path)
+            if image is None:
+                raise ValueError(f"Could not read image at {image_path}")
+            
+            height, width = image.shape[:2]
+            logger.info(f"Image dimensions: {width}x{height}")
+            return width, height
+            
+        except Exception as e:
+            logger.error(f"Error getting image dimensions: {e}")
+            raise
+    
+    def generate_bounding_boxes_with_openai(self, image_path, text_parts):
+        """
+        Generate bounding box coordinates for text placement using OpenAI Vision API.
+        
+        Args:
+            image_path: Path to the meme template image
+            text_parts: List of text strings to place on the image
+            
+        Returns:
+            List of tuples: (bounding_box_coords, text, confidence)
+        """
+        try:
+            if not text_parts:
+                logger.warning("No text parts provided for OpenAI bounding box generation")
+                return []
+            
+            # Get image dimensions
+            width, height = self.get_image_dimensions(image_path)
+            num_texts = len(text_parts)
+            
+            # Validate text parts
+            if num_texts == 0:
+                logger.warning("Empty text parts list provided")
+                return []
+            
+            # Create display text for prompt
+            display_text = "\n".join([f"- {text}" for text in text_parts])
+            
+            # Encode image to base64 for OpenAI Vision API
+            import base64
+            with open(image_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode('utf-8')
+            
+            # Create prompt for OpenAI Vision API
+            prompt = f"""Look at this meme template image and provide optimum bounding box coordinates AND text sizes for the following text parts:
+
+Text parts to place:
+{display_text}
+
+The image resolution is: {width}x{height}
+
+STRICT REQUIREMENTS for text sizing:
+- For images under 500px width: font size 15-25 pixels MAX
+- For images 500-800px width: font size 20-35 pixels MAX  
+- For images 800-1200px width: font size 25-45 pixels MAX
+- For images over 1200px width: font size 30-55 pixels MAX
+- Text height should NEVER exceed 8% of image height
+- Text width should NEVER exceed 85% of image width
+- Prioritize READABILITY over large text - smaller is better than overlapping
+
+Analyze the image and place text in optimal positions that:
+- Avoid covering the main subject/character completely
+- Use traditional meme layout positions (top/bottom for 2 texts, distributed for more)
+- Leave appropriate margins from edges (minimum 5% of image dimensions)
+- Keep text compact and readable
+- Choose CONSERVATIVE text sizes - err on the side of smaller text
+
+Return ONLY a JSON dictionary in this EXACT format with EXACTLY these keys:
+{{"text1": {{"bbox": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], "font_size": 25}}, "text2": {{"bbox": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], "font_size": 22}}, "text3": {{"bbox": [[x1, y1], [x2, y1], [x2, y2], [x1, y2]], "font_size": 20}}}}
+
+CRITICAL SIZING RULES:
+- For this {width}x{height} image, maximum font size is {min(55, max(15, int(width * 0.04)))} pixels
+- Bounding box height should be 6-10% of image height maximum
+- Text should fit comfortably within bounding boxes with padding
+- Use ONLY "text1", "text2", "text3" etc. as keys (NOT the actual text content)
+- Each bounding box is a rectangle with 4 corner coordinates in pixels
+- Return ONLY the JSON, no other text or explanation"""
+
+            logger.info(f"Sending prompt to OpenAI Vision API for {num_texts} text parts: {text_parts}")
+            
+            # Call OpenAI Vision API
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": prompt
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{base64_image}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                max_tokens=500,
+                temperature=0.1
+            )
+            
+            # Parse response
+            response_text = response.choices[0].message.content.strip()
+            logger.info(f"OpenAI Vision API response: {response_text}")
+            
+            # Try to parse JSON
+            try:
+                # Strip markdown code blocks if present
+                if response_text.startswith("```json"):
+                    # Remove ```json from start and ``` from end
+                    response_text = response_text[7:]  # Remove ```json
+                    if response_text.endswith("```"):
+                        response_text = response_text[:-3]  # Remove ```
+                elif response_text.startswith("```"):
+                    # Remove ``` from start and end
+                    response_text = response_text[3:]
+                    if response_text.endswith("```"):
+                        response_text = response_text[:-3]
+                
+                # Clean up any remaining whitespace
+                response_text = response_text.strip()
+                
+                logger.info(f"Cleaned JSON for parsing: {response_text}")
+                
+                bounding_boxes = json.loads(response_text)
+                
+                # Validate the response format
+                if not isinstance(bounding_boxes, dict):
+                    raise ValueError("Response is not a dictionary")
+                
+                # Convert to the format expected by our system
+                formatted_boxes = []
+                for i, text_part in enumerate(text_parts):
+                    text_key = f"text{i+1}"
+                    if text_key in bounding_boxes:
+                        text_data = bounding_boxes[text_key]
+                        
+                        # Handle both old format (direct bbox) and new format (bbox + font_size)
+                        if isinstance(text_data, dict) and "bbox" in text_data:
+                            # New format with bbox and font_size
+                            bbox_coords = text_data["bbox"]
+                            font_size = text_data.get("font_size", 40)  # Default to 40 if missing
+                        elif isinstance(text_data, list):
+                            # Old format (direct bbox coordinates)
+                            bbox_coords = text_data
+                            font_size = 40  # Default font size
+                        else:
+                            logger.warning(f"Invalid format for {text_key}: {text_data}")
+                            continue
+                        
+                        if len(bbox_coords) == 4 and all(len(coord) == 2 for coord in bbox_coords):
+                            # Format: (bbox, text, confidence, font_size) - Include font size
+                            formatted_boxes.append((bbox_coords, text_part, 1.0, font_size))
+                            logger.info(f"Generated bounding box for '{text_part}': {bbox_coords} with font size {font_size}")
+                        else:
+                            logger.warning(f"Invalid bounding box format for {text_key}")
+                    else:
+                        logger.warning(f"Missing bounding box for {text_key}")
+                
+                logger.info(f"Generated {len(formatted_boxes)} bounding boxes using OpenAI Vision API")
+                return formatted_boxes
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse OpenAI response as JSON: {e}")
+                logger.error(f"Response was: {response_text}")
+                raise ValueError("OpenAI returned invalid JSON")
+                
+        except Exception as e:
+            logger.error(f"Error generating bounding boxes with OpenAI Vision API: {e}")
             raise 
