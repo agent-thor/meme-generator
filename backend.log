@@ -1,0 +1,6 @@
+[2025-06-03 21:32:15 +0530] [34326] [INFO] Starting gunicorn 21.2.0
+[2025-06-03 21:32:15 +0530] [34326] [INFO] Listening at: http://0.0.0.0:5003 (34326)
+[2025-06-03 21:32:15 +0530] [34326] [INFO] Using worker: sync
+[2025-06-03 21:32:15 +0530] [34332] [INFO] Booting worker with pid: 34332
+INFO:bot.routes:Initializing MemeService (this may take a moment on first load)...
+INFO:bot.routes:MemeService initialized successfully

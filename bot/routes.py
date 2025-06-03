@@ -21,6 +21,47 @@ from utils import download_image_from_url
 
 logger = logging.getLogger(__name__)
 
+# Global service instances - initialized once at startup
+_meme_service = None
+_vector_db = None
+
+def get_meme_service():
+    """Get the global MemeService instance, initializing if needed."""
+    global _meme_service
+    if _meme_service is None:
+        logger.info("Initializing MemeService (this may take a moment on first load)...")
+        _meme_service = MemeService()
+        logger.info("MemeService initialized successfully")
+    return _meme_service
+
+def get_vector_db():
+    """Get the global ImageVectorDB instance, initializing if needed."""
+    global _vector_db
+    if _vector_db is None:
+        logger.info("Initializing ImageVectorDB (this may take a moment on first load)...")
+        _vector_db = ImageVectorDB()
+        logger.info("ImageVectorDB initialized successfully")
+    return _vector_db
+
+def warmup_models():
+    """Initialize all models during startup to avoid delays on first request."""
+    try:
+        logger.info("Starting model warmup...")
+        
+        # Initialize MemeService (loads OCR models)
+        meme_service = get_meme_service()
+        logger.info("MemeService initialized")
+        
+        # Initialize ImageVectorDB (loads CLIP model and vector database)
+        vector_db = get_vector_db()
+        logger.info("ImageVectorDB initialized")
+        
+        logger.info("Model warmup completed successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Model warmup failed: {e}")
+        return False
+
 def fix_vector_db_path(old_path):
     """Fix old vector database paths to current project paths."""
     project_base = os.getenv('PROJECT_BASE_PATH', '/Users/krishnayadav/Documents/forgex/memezap/memezap-backend')
@@ -36,7 +77,8 @@ def fix_vector_db_path(old_path):
 
 def configure_routes(app):
     """Configure Flask routes."""
-    meme_engine = MemeService()
+    # Use global service instance instead of creating new one
+    meme_engine = get_meme_service()
     
     @app.route('/')
     def index():
@@ -176,9 +218,9 @@ def configure_routes(app):
             else:
                 return jsonify({'error': 'No image provided'}), 400
             
-            # Initialize services
-            meme_service = MemeService()
-            vector_db = ImageVectorDB()
+            # Use global service instances (already loaded at startup)
+            meme_service = get_meme_service()
+            vector_db = get_vector_db()
             
             # First, clean any text from the image with confidence > 0.5
             logger.info(f"Cleaning text from image: {local_image_path}")
