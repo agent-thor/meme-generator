@@ -260,63 +260,205 @@ class MemeService:
 
     def detect_text(self, image_path):
         """
-        Detect text in an image using EasyOCR with improved merging logic.
+        Detect text in an image using EasyOCR with caching support.
         
         Args:
             image_path: Path to the image file
             
         Returns:
-            Tuple of (detected_text_with_bounding_boxes, image)
+            Tuple of (text_results, image) where text_results is a list of 
+            (bounding_box, text, confidence) tuples
         """
-        # Read image
+        # Check cache first
+        cached_result = self._get_cached_ocr_result(image_path)
+        if cached_result is not None:
+            text_results, image_shape = cached_result
+            # Load image for return
+            image = cv2.imread(image_path)
+            return text_results, image
+        
+        # Load image
         image = cv2.imread(image_path)
         if image is None:
-            logger.error(f"Failed to read image at {image_path}")
-            raise ValueError(f"Could not read image at {image_path}")
+            raise ValueError(f"Could not read image from {image_path}")
         
-        # Detect text and return bounding boxes
-        results = self.ocr_reader.readtext(image_path)
+        # Perform OCR
+        start_time = time.time()
+        logger.info(f"Running OCR on {image_path}...")
         
-        # Filter results with good confidence
-        filtered_results = [r for r in results if r[2] > 0.5]
+        results = self.ocr_reader.readtext(image)
         
-        logger.info(f"Initial OCR detected {len(filtered_results)} text regions")
+        ocr_time = time.time() - start_time
+        logger.info(f"OCR completed in {ocr_time:.2f} seconds, found {len(results)} text regions")
         
-        # Merge nearby text regions
-        merged_results = self.merge_nearby_text_regions(filtered_results, merge_threshold=50)
+        # Process results
+        text_results = []
+        for (bbox, text, prob) in results:
+            # Convert bbox to list of [x, y] points
+            bbox_points = [[int(point[0]), int(point[1])] for point in bbox]
+            text_results.append((bbox_points, text, prob))
+            logger.debug(f"Detected: '{text}' with confidence {prob:.2f}")
         
-        logger.info(f"Final result: {len(merged_results)} major text areas")
+        # Merge nearby text regions for better performance
+        merged_results = self.merge_nearby_text_regions(text_results)
+        
+        # Cache the result
+        cache_data = (merged_results, image.shape)
+        self._cache_ocr_result(image_path, cache_data)
         
         return merged_results, image
     
-    def get_font(self, size, font_path=None):
+    def fast_inpaint(self, image, mask, inpaint_radius=3):
         """
-        Get a font object with the specified size.
+        Fast inpainting method with optimizations.
         
         Args:
-            size: Font size
-            font_path: Optional path to a custom font file
+            image: Input image (numpy array)
+            mask: Mask indicating areas to inpaint
+            inpaint_radius: Radius for inpainting
             
         Returns:
-            PIL.ImageFont object
+            Inpainted image
         """
-        if font_path:
-            try:
-                return ImageFont.truetype(font_path, size)
-            except IOError:
-                logger.warning(f"Custom font at {font_path} not found, trying system fonts")
+        if not self.enable_fast_inpaint:
+            return cv2.inpaint(image, mask, inpaint_radius, cv2.INPAINT_TELEA)
         
+        # Use faster INPAINT_NS method for better performance
+        return cv2.inpaint(image, mask, inpaint_radius, cv2.INPAINT_NS)
+    
+    def remove_text_and_inpaint(self, image_path, min_confidence=0.5, output_path=None):
+        """
+        Remove all text regions with confidence > min_confidence and inpaint them.
+        Optimized version with caching and fast inpainting.
+        
+        Args:
+            image_path: Path to the input image
+            min_confidence: Minimum confidence for text to be removed
+            output_path: Path to save the cleaned image (optional)
+        Returns:
+            Path to the cleaned image
+        """
+        # Check if we have a cached cleaned version
+        if output_path and os.path.exists(output_path):
+            logger.info(f"Using existing cleaned image: {output_path}")
+            return output_path
+        
+        start_time = time.time()
+        text_results, image = self.detect_text(image_path)
+        
+        # Create mask for text regions
+        mask = np.zeros(image.shape[:2], np.uint8)
+        text_regions_removed = 0
+        
+        for bbox, text, prob in text_results:
+            if prob > min_confidence:
+                x_min = min(point[0] for point in bbox)
+                y_min = min(point[1] for point in bbox)
+                x_max = max(point[0] for point in bbox)
+                y_max = max(point[1] for point in bbox)
+                
+                # Add small padding to ensure complete text removal
+                padding = 2
+                x_min = max(0, x_min - padding)
+                y_min = max(0, y_min - padding)
+                x_max = min(image.shape[1], x_max + padding)
+                y_max = min(image.shape[0], y_max + padding)
+                
+                cv2.rectangle(mask, (int(x_min), int(y_min)), (int(x_max), int(y_max)), 255, -1)
+                text_regions_removed += 1
+        
+        if text_regions_removed == 0:
+            logger.info("No text regions found to remove")
+            # Just copy the original image
+            if output_path is None:
+                output_path = str(Path(image_path).with_name(Path(image_path).stem + '_cleaned.jpg'))
+            shutil.copy2(image_path, output_path)
+            return output_path
+        
+        # Perform fast inpainting
+        logger.info(f"Inpainting {text_regions_removed} text regions...")
+        inpainted = self.fast_inpaint(image, mask, inpaint_radius=3)
+        
+        if output_path is None:
+            output_path = str(Path(image_path).with_name(Path(image_path).stem + '_cleaned.jpg'))
+        
+        cv2.imwrite(output_path, inpainted)
+        
+        inpaint_time = time.time() - start_time
+        logger.info(f"Text removal and inpainting completed in {inpaint_time:.2f} seconds")
+        
+        return output_path
+    
+    @lru_cache(maxsize=32)
+    def get_font(self, size, font_path=None):
+        """
+        Get a font object with caching for better performance.
+        
+        Args:
+            size: Font size in pixels
+            font_path: Optional path to custom font file
+            
+        Returns:
+            PIL ImageFont object
+        """
         try:
-            return ImageFont.truetype("Impact.ttf", size)
-        except IOError:
-            try:
-                return ImageFont.truetype("Arial.ttf", size)
-            except IOError:
-                logger.warning("Standard fonts not found, using default font")
-                try:
-                    return ImageFont.load_default().font_variant(size=size)
-                except:
-                    return ImageFont.load_default()
+            if font_path and os.path.exists(font_path):
+                return ImageFont.truetype(font_path, size)
+            else:
+                # Try to use a system font
+                system_fonts = [
+                    "/System/Library/Fonts/Arial.ttf",  # macOS
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
+                    "C:/Windows/Fonts/arial.ttf",  # Windows
+                    "/System/Library/Fonts/Helvetica.ttc",  # macOS alternative
+                ]
+                
+                for font_file in system_fonts:
+                    if os.path.exists(font_file):
+                        return ImageFont.truetype(font_file, size)
+                
+                # Fallback to default font
+                return ImageFont.load_default()
+        except Exception as e:
+            logger.warning(f"Could not load font: {e}")
+            return ImageFont.load_default()
+    
+    def optimize_image_for_processing(self, image_path, max_dimension=1024):
+        """
+        Optimize image size for faster processing while maintaining quality.
+        
+        Args:
+            image_path: Path to the input image
+            max_dimension: Maximum width or height for processing
+            
+        Returns:
+            Tuple of (optimized_image_path, scale_factor)
+        """
+        image = cv2.imread(image_path)
+        if image is None:
+            return image_path, 1.0
+        
+        height, width = image.shape[:2]
+        
+        # If image is already small enough, return as-is
+        if max(width, height) <= max_dimension:
+            return image_path, 1.0
+        
+        # Calculate scale factor
+        scale_factor = max_dimension / max(width, height)
+        new_width = int(width * scale_factor)
+        new_height = int(height * scale_factor)
+        
+        # Resize image
+        resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+        
+        # Save optimized image
+        optimized_path = str(Path(image_path).with_name(Path(image_path).stem + '_optimized.jpg'))
+        cv2.imwrite(optimized_path, resized_image, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        
+        logger.info(f"Optimized image from {width}x{height} to {new_width}x{new_height} (scale: {scale_factor:.2f})")
+        
+        return optimized_path, scale_factor
     
     def generate_meme(self, image_path, text_list=None, output_path=None, 
                        remove_existing_text=True, text_color=(0, 0, 0), outline_color=(255, 255, 255), font_path=None):
@@ -683,31 +825,6 @@ class MemeService:
         if not similar_path or os.path.abspath(similar_path) != os.path.abspath(image_path):
             vector_db.add_image(image_path)
         return meme_path, from_template
-    
-    def remove_text_and_inpaint(self, image_path, min_confidence=0.5, output_path=None):
-        """
-        Remove all text regions with confidence > min_confidence and inpaint them.
-        Args:
-            image_path: Path to the input image
-            min_confidence: Minimum confidence for text to be removed
-            output_path: Path to save the cleaned image (optional)
-        Returns:
-            Path to the cleaned image
-        """
-        text_results, image = self.detect_text(image_path)
-        mask = np.zeros(image.shape[:2], np.uint8)
-        for bbox, text, prob in text_results:
-            if prob > min_confidence:
-                x_min = min(point[0] for point in bbox)
-                y_min = min(point[1] for point in bbox)
-                x_max = max(point[0] for point in bbox)
-                y_max = max(point[1] for point in bbox)
-                cv2.rectangle(mask, (int(x_min), int(y_min)), (int(x_max), int(y_max)), 255, -1)
-        inpainted = cv2.inpaint(image, mask, 3, cv2.INPAINT_TELEA)
-        if output_path is None:
-            output_path = str(Path(image_path).with_name(Path(image_path).stem + '_cleaned.jpg'))
-        cv2.imwrite(output_path, inpainted)
-        return output_path
     
     def generate_meme_from_clean(self, clean_image_path, text_list=None, output_path=None, 
                                 text_color=(0, 0, 0), outline_color=(255, 255, 255), font_path=None,

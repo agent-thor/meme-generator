@@ -32,4 +32,48 @@ ai:
   caption_model: ${AI_CAPTION_MODEL}
   image_model: ${AI_IMAGE_MODEL}
   max_tokens: ${AI_MAX_TOKENS}
-  temperature: ${AI_TEMPERATURE} 
+  temperature: ${AI_TEMPERATURE}
+
+# MemeZap Performance Configuration
+# Adjust these settings to optimize performance for your hardware
+
+# OCR Settings
+ocr:
+  enable_cache: true
+  cache_expiry_days: 7
+  confidence_threshold: 0.5
+
+# Image Processing
+image_processing:
+  enable_fast_inpaint: true
+  max_processing_dimension: 1024
+  jpeg_quality: 90
+  skip_text_removal_threshold: 0.3  # Skip text removal if confidence < this
+
+# Vector Database
+vector_db:
+  enable_gpu: true
+  enable_half_precision: true
+  max_image_size: 512
+  cache_size: 128
+  similarity_threshold: 0.8
+
+# OpenAI Integration
+openai:
+  timeout_seconds: 30
+  max_retries: 2
+  enable_fallback: true
+
+# Performance Monitoring
+monitoring:
+  log_timing: true
+  log_memory_usage: false
+  enable_profiling: false
+
+# Cache Settings
+cache:
+  enable_font_cache: true
+  font_cache_size: 32
+  enable_image_cache: true
+  image_cache_size: 64
+  cleanup_interval_hours: 24 

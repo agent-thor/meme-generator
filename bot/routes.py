@@ -23,6 +23,16 @@ from utils import download_image_from_url
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Import performance monitoring utilities
+try:
+    from utils.performance_monitor import time_operation, get_performance_summary, log_system_info
+    # Log system info on startup
+    log_system_info()
+    PERFORMANCE_MONITORING = True
+except ImportError:
+    logger.warning("Performance monitoring not available - install psutil for monitoring")
+    PERFORMANCE_MONITORING = False
+
 # Global instances to avoid re-initialization
 _meme_service = None
 _vector_db = None
@@ -224,19 +234,28 @@ def configure_routes(app):
             meme_service = get_meme_service()
             vector_db = get_vector_db()
             
-            # First, clean any text from the image with confidence > 0.5
-            logger.info(f"Cleaning text from image: {local_image_path}")
-            original_filename = os.path.basename(local_image_path)
-            cleaned_filename = f"cleaned_{original_filename}"
-            cleaned_image_path = str(cleaned_image_dir / cleaned_filename)
+            # Performance optimization: Check if we need text removal
+            logger.info(f"Checking if text removal is needed for: {local_image_path}")
+            text_results, _ = meme_service.detect_text(local_image_path)
             
-            # Remove text and save to cleaned_images folder
-            meme_service.remove_text_and_inpaint(
-                local_image_path, 
-                min_confidence=0.5,
-                output_path=cleaned_image_path
-            )
-            logger.info(f"Text cleaned, saved to: {cleaned_image_path}")
+            # Only perform text removal if text is actually detected
+            if text_results and any(prob > 0.5 for _, _, prob in text_results):
+                logger.info(f"Text detected, cleaning image: {local_image_path}")
+                original_filename = os.path.basename(local_image_path)
+                cleaned_filename = f"cleaned_{original_filename}"
+                cleaned_image_path = str(cleaned_image_dir / cleaned_filename)
+                
+                # Remove text and save to cleaned_images folder
+                meme_service.remove_text_and_inpaint(
+                    local_image_path, 
+                    min_confidence=0.5,
+                    output_path=cleaned_image_path
+                )
+                logger.info(f"Text cleaned, saved to: {cleaned_image_path}")
+            else:
+                logger.info("No significant text detected, skipping text removal for performance")
+                # Use original image as "cleaned" image
+                cleaned_image_path = local_image_path
             
             # Log the top 5 most similar images
             try:
@@ -483,4 +502,17 @@ def configure_routes(app):
         except Exception as e:
             logger.error(f"Error generating smart meme: {e}", exc_info=True)
             return jsonify({'error': f'Error generating meme: {str(e)}'}), 500
+    
+    @app.route('/api/performance', methods=['GET'])
+    def get_performance_metrics():
+        """Get performance metrics and system information."""
+        try:
+            if not PERFORMANCE_MONITORING:
+                return jsonify({'error': 'Performance monitoring not available'}), 503
+            
+            summary = get_performance_summary()
+            return jsonify(summary)
+        except Exception as e:
+            logger.error(f"Error getting performance metrics: {e}")
+            return jsonify({'error': str(e)}), 500
    
