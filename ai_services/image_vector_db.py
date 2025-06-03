@@ -76,7 +76,7 @@ class ImageVectorDB:
             return self.image_paths[idx], max_sim
         return None, max_sim
 
-    def search_top_k(self, image_path, k=5, threshold=0.0):
+    def search_top_k(self, image_path, k=5, threshold=0.9):
         """
         Search for the top-k most similar images to the given image.
         
