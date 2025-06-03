@@ -1,22 +1,30 @@
-# Meme Generator
+# MemeZap Backend - AI-Powered Meme Generator
 
-A powerful meme generation platform with both Twitter bot and web interface capabilities.
+A powerful meme generation platform with both Twitter bot and web interface capabilities, featuring **OpenAI Vision API integration** for smart text placement and template matching from 2200+ meme templates.
 
-## Features
+## 🚀 Key Features
 
-- Twitter bot for meme generation on demand
-- Web interface for easy meme creation
-- AI-powered caption generation
-- Template matching and image understanding
-- Support for custom templates
+### 🤖 OpenAI Vision API Integration
+- **Smart Text Placement**: AI analyzes image content to place text optimally
+- **Context-Aware Positioning**: Avoids covering main subjects and characters
+- **Intelligent Font Sizing**: Resolution-aware text sizing for perfect readability
+- **Professional Layout**: Traditional meme positioning with AI precision
+
+### 🎯 Advanced Processing Modes
+- **Template Matching**: 2200+ meme templates with 80% similarity threshold
+- **OCR Text Detection**: EasyOCR for precise text region identification
+- **White Box Generation**: Classic meme style for original images
+- **Fallback Systems**: Multiple processing modes for reliability
 
 ## Project Structure
 
 ```
-memezap/
+memezap-backend/
 ├── bot/                    # Twitter bot (V1)
 ├── webapp/                 # Web interface for meme creation
 ├── ai_services/            # AI + ML related components
+│   ├── meme_service.py     # Main processing engine with OpenAI integration
+│   └── image_vector_db.py  # Template matching and similarity search
 ├── data/                   # Meme templates and examples
 ├── scripts/                # Utility or setup scripts
 └── tests/                  # Unit & integration tests
@@ -60,14 +68,17 @@ memezap/
 The application uses environment variables for configuration. Create a `.env` file at the project root with the following variables:
 
 ```
+# OpenAI API Key (Required for AI text placement)
+OPENAI_API_KEY=your_openai_api_key
+
+# Project Base Path
+PROJECT_BASE_PATH=/path/to/your/project
+
 # Twitter API Keys
 TWITTER_CONSUMER_KEY=your_twitter_consumer_key
 TWITTER_CONSUMER_SECRET=your_twitter_consumer_secret
 TWITTER_ACCESS_TOKEN=your_twitter_access_token
 TWITTER_ACCESS_TOKEN_SECRET=your_twitter_access_token_secret
-
-# OpenAI API Key
-OPENAI_API_KEY=your_openai_api_key
 
 # AWS Configuration
 AWS_ACCESS_KEY_ID=your_aws_access_key_id
@@ -91,6 +102,58 @@ AI_MAX_TOKENS=100
 AI_TEMPERATURE=0.7
 ```
 
+## 🧠 Advanced AI Processing
+
+### 🎨 Processing Workflow
+
+#### Case 1: Template Found + Text Detected
+1. **Template Selection**: Finds best matching template (≥80% similarity)
+2. **OCR Detection**: Scans original image for existing text regions
+3. **Bounding Box Extraction**: Identifies bounding boxes around detected text
+4. **Template Application**: Applies new text to template using detected bounding box positions
+5. **Text Replacement**: Places caption parts at corresponding positions on template
+
+#### Case 2: Template Found + No Text Detected
+1. **Template Selection**: Uses matched template from database
+2. **OCR Analysis**: No text regions detected in original image
+3. **OpenAI Vision API**: Analyzes template image to generate optimal bounding boxes
+4. **Smart Placement**: AI creates bounding boxes avoiding main subjects
+5. **Resolution-Aware Sizing**: Font sizes calculated based on template dimensions
+6. **Direct Application**: Text applied to template using AI-generated positions
+
+#### Case 3: No Template Found
+1. **Original Image Processing**: No similar template found in database
+2. **White Box Generation**: Adds white boxes at top and/or bottom of original image
+3. **Text Sizing**: Boxes are sized to fit the input text appropriately
+4. **Text Rendering**: User's text is rendered inside these white boxes
+5. **Classic Meme Style**: Traditional meme format with white text boxes
+
+### 🤖 When OpenAI Vision API is Used
+
+**OpenAI Vision API is ONLY used when:**
+- ✅ A template is found (≥80% similarity)
+- ✅ AND no text is detected in the original image
+- ✅ The system analyzes the template image to generate smart bounding boxes
+
+**OpenAI Vision API is NOT used when:**
+- ❌ No template is found (uses white boxes instead)
+- ❌ Text is detected in original image (uses OCR bounding boxes instead)
+- ❌ Processing original images without template matching
+
+### 📏 Resolution-Aware Text Sizing
+
+**Strict Font Size Rules:**
+- **Under 500px width**: 15-25px font size MAX
+- **500-800px width**: 20-35px font size MAX  
+- **800-1200px width**: 25-45px font size MAX
+- **Over 1200px width**: 30-55px font size MAX
+
+**Additional Constraints:**
+- Text height: NEVER exceeds 8% of image height
+- Text width: NEVER exceeds 85% of image width
+- Bounding box height: 6-10% of image height maximum
+- Conservative sizing: Prioritizes readability over large text
+
 ## Running the Components
 
 ### Meme Generation API
@@ -111,6 +174,21 @@ The web interface runs on port 8000 by default and provides a user-friendly inte
 ./run_webapp.sh
 # or
 python webapp/app.py
+```
+
+## 🎯 Processing Pipeline
+
+### Primary Workflow (Template Found)
+```
+Image Upload → Template Similarity Search → 
+├─ Text Detected: OCR Bounding Box Extraction → Text Placement on Template
+└─ No Text: OpenAI Vision Analysis → AI Bounding Box Generation → Text Placement on Template
+```
+
+### Fallback Workflow (No Template)
+```
+Image Upload → No Template Match → 
+White Box Generation → Text Rendering in Boxes → Original Image + White Boxes Output
 ```
 
 ## AWS S3 Configuration
@@ -157,6 +235,42 @@ Edit `config.yaml` to set up:
 - Path configurations
 - AI model settings
 
+## 🔧 Technical Features
+
+### AI-Powered Processing
+- **OpenAI Vision API**: GPT-4o model with vision capabilities for smart text placement
+- **Computer Vision**: Advanced feature extraction for template matching
+- **OCR Technology**: EasyOCR for precise text detection and merging
+- **Inpainting Algorithms**: TELEA method for seamless text removal
+
+### Smart Text Management
+- **Text Region Merging**: Combines nearby text regions into major areas
+- **Confidence Filtering**: Only processes text with >50% detection confidence
+- **Dynamic Font Sizing**: Resolution-aware sizing with strict constraints
+- **Outline Rendering**: High-contrast text with customizable outlines
+
+### Quality Assurance
+- **Aspect Ratio Preservation**: Maintains original image proportions
+- **Edge Detection**: AI avoids placing text over important image elements
+- **Conservative Sizing**: Ensures text remains readable and professional
+- **Fallback Systems**: Multiple processing modes for reliability
+
+## API Endpoints
+
+### `/api/smart_generate` - Advanced Meme Generation
+- **Method**: POST
+- **Features**: Template matching with AI placement
+- **Processing**: OCR detection → OpenAI Vision API fallback → White box fallback
+- **Response**: Generated meme with optimal text placement
+
+### `/api/generate` - Traditional Meme Generation
+- **Method**: POST
+- **Features**: Basic meme generation with OCR
+- **Processing**: Text detection and replacement
+- **Response**: Generated meme with detected text regions
+
+Both endpoints support resolution-aware text sizing and multiple processing modes.
+
 ## Contributing
 
 1. Fork the repository
@@ -171,7 +285,7 @@ MIT License
 
 ## How It Works
 
-### Workflow Diagram
+### Detailed Workflow
 
 ```
 User Uploads Image
@@ -180,20 +294,28 @@ User Uploads Image
 Upload to S3 & Download Locally
         |
         v
-Remove Text (Inpaint) from Uploaded Image
+Template Similarity Search (Vector DB)
+        |
+   +----+----+
+   |         |
+[Template Found ≥80%]   [No Template Match]
+   |         |
+   v         |
+OCR Text Detection      |
+   |         |
++--+--+      |
+|     |      |
+[Text Found] [No Text]  |
+|     |      |
+v     v      v
+Use   OpenAI White Box
+OCR   Vision Generation
+Boxes API    |
+|     |      |
++-----+------+
         |
         v
-Vector DB Similarity Search (on cleaned image)
-        |
-   +----+----+
-   |         |
-[Similarity > 80%]   [No Good Match]
-   |         |
-   v         v
-White Box   Classic Meme
-Meme        Generation
-   |         |
-   +----+----+
+Apply Text to Template/Image
         |
         v
 Return/Display Meme
@@ -208,30 +330,24 @@ Return/Display Meme
     - The image is uploaded to your S3 bucket for storage.
     - The image is then downloaded to your local server for processing.
 
-3. **Remove Text from Uploaded Image**
-    - The backend uses `MemeService.remove_text_and_inpaint` to:
-      - Detect all text regions in the image (using EasyOCR).
-      - For each region with confidence > 0.5, create a mask and inpaint (remove) the text.
-      - Save the cleaned (text-free) image to a temporary file.
-
-4. **Image Similarity Search**
-    - The cleaned image is passed to the vector database (`ImageVectorDB`).
+3. **Template Similarity Search**
+    - The image is passed to the vector database (`ImageVectorDB`).
     - The vector DB computes the image embedding (using CLIP) and searches for the most similar image among your pre-indexed meme templates.
-    - If a match is found with **similarity > 80%** (or your chosen threshold):
-        - The path to the most similar image is returned.
-    - If no match is found above the threshold, the process continues with the original image.
+    - If a match is found with **similarity ≥ 80%**, the template path is returned.
 
-5. **Meme Generation Logic**
-    - **If a similar image is found (similarity > 80%):**
-        - The system uses the matched template image.
-        - It adds a white box at the top and/or bottom of the image, sized to fit the input text.
-        - The user's text is rendered inside these boxes.
-        - The result is saved as the generated meme.
-    - **If no similar image is found:**
-        - The system uses the current meme generation approach:
-            - Detects and removes any existing text from the uploaded image.
-            - Adds the user's text in the appropriate locations (using detected regions or as classic meme text).
-        - The result is saved as the generated meme.
+4. **Intelligent Processing Logic**
+    - **If template found:**
+        - **First**: OCR scans original image for text regions
+        - **If text detected**: Use OCR bounding boxes on template
+        - **If no text detected**: Use OpenAI Vision API on template for smart bounding boxes
+    - **If no template found:**
+        - Generate white boxes at top/bottom of original image
+        - Render user text inside these boxes
+
+5. **Text Application**
+    - **Template mode**: Apply text to template using detected or AI-generated bounding boxes
+    - **Original mode**: Render text in white boxes on original image
+    - **Font sizing**: Resolution-aware sizing with conservative constraints
 
 6. **Return/Display the Meme**
     - The generated meme image is saved in `data/generated_memes/`.
@@ -239,9 +355,16 @@ Return/Display Meme
 
 ---
 
+### Utility Scripts
+
 - **Vector DB Build Script (`scripts/build_vector_db.py`):**
     - Run this script to precompute and store embeddings for all your meme templates (e.g., in `data/meme_templates/`).
     - This ensures fast and accurate similarity search at runtime.
 
-- **Text Removal Utility:**
-    - The `remove_text_and_inpaint` method in `MemeService` can be used both during upload and when building the vector DB (if you want to store only cleaned templates).
+- **Text Detection and Processing:**
+    - The `MemeService` class handles all text detection, removal, and placement operations.
+    - Supports both OCR-based and AI-generated bounding box workflows.
+
+---
+
+*MemeZap Backend combines cutting-edge AI with robust processing pipelines to deliver professional-quality meme generation. Now powered by OpenAI Vision API for the smartest text placement available.* 🎯
