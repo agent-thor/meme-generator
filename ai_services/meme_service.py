@@ -16,6 +16,9 @@ import json
 import yaml
 from dotenv import load_dotenv
 import time
+import hashlib
+from functools import lru_cache
+import pickle
 
 # Load environment variables
 load_dotenv()
@@ -35,18 +38,76 @@ class MemeService:
         self.generated_memes_dir = Path(__file__).parent.parent / "data" / "generated_memes"
         self.generated_memes_dir.mkdir(parents=True, exist_ok=True)
         
+        # Cache directory for OCR results
+        self.cache_dir = Path(__file__).parent.parent / "data" / "cache"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
         # Initialize OpenAI
         self.openai_client = None
         if os.getenv('OPENAI_API_KEY'):
             self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
         else:
             logger.warning("OpenAI API key not found. AI-generated bounding boxes will not be available.")
+        
+        # Performance optimization flags
+        self.enable_ocr_cache = True
+        self.enable_fast_inpaint = True
+        self.skip_text_removal_for_templates = True
     
+    def _get_image_hash(self, image_path):
+        """Generate a hash for an image file for caching purposes."""
+        try:
+            with open(image_path, 'rb') as f:
+                file_hash = hashlib.md5(f.read()).hexdigest()
+            return file_hash
+        except Exception as e:
+            logger.warning(f"Could not generate hash for {image_path}: {e}")
+            return None
+    
+    def _get_cached_ocr_result(self, image_path):
+        """Get cached OCR result if available."""
+        if not self.enable_ocr_cache:
+            return None
+            
+        image_hash = self._get_image_hash(image_path)
+        if not image_hash:
+            return None
+            
+        cache_file = self.cache_dir / f"ocr_{image_hash}.pkl"
+        if cache_file.exists():
+            try:
+                with open(cache_file, 'rb') as f:
+                    cached_result = pickle.load(f)
+                logger.info(f"Using cached OCR result for {image_path}")
+                return cached_result
+            except Exception as e:
+                logger.warning(f"Failed to load cached OCR result: {e}")
+        return None
+    
+    def _cache_ocr_result(self, image_path, ocr_result):
+        """Cache OCR result for future use."""
+        if not self.enable_ocr_cache:
+            return
+            
+        image_hash = self._get_image_hash(image_path)
+        if not image_hash:
+            return
+            
+        cache_file = self.cache_dir / f"ocr_{image_hash}.pkl"
+        try:
+            with open(cache_file, 'wb') as f:
+                pickle.dump(ocr_result, f)
+            logger.debug(f"Cached OCR result for {image_path}")
+        except Exception as e:
+            logger.warning(f"Failed to cache OCR result: {e}")
+
     @property
     def ocr_reader(self):
         """Lazy initialization of OCR reader."""
         if self._ocr_reader is None:
+            logger.info("Initializing EasyOCR reader...")
             self._ocr_reader = easyocr.Reader(['en'])
+            logger.info("EasyOCR reader initialized")
         return self._ocr_reader
     
     def calculate_optimal_font_size(self, text, image_width, max_height, default_size=40, min_size=20, max_size=80):

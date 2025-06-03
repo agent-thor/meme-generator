@@ -19,7 +19,29 @@ from ai_services.meme_service import MemeService
 from ai_services.image_vector_db import ImageVectorDB
 from utils import download_image_from_url
 
+# Set up logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Global instances to avoid re-initialization
+_meme_service = None
+_vector_db = None
+
+def get_meme_service():
+    """Get or create global MemeService instance"""
+    global _meme_service
+    if _meme_service is None:
+        _meme_service = MemeService()
+    return _meme_service
+
+def get_vector_db():
+    """Get or create global ImageVectorDB instance"""
+    global _vector_db
+    if _vector_db is None:
+        logger.info("Initializing ImageVectorDB (this may take a moment on first load)...")
+        _vector_db = ImageVectorDB()
+        logger.info("ImageVectorDB initialized successfully")
+    return _vector_db
 
 def fix_vector_db_path(old_path):
     """Fix old vector database paths to current project paths."""
@@ -34,9 +56,28 @@ def fix_vector_db_path(old_path):
     
     return old_path
 
+def warmup_models():
+    """Warmup function to pre-initialize models during application startup"""
+    try:
+        logger.info("Starting model warmup...")
+        
+        # Initialize MemeService (loads OCR and OpenAI client)
+        meme_service = get_meme_service()
+        logger.info("MemeService initialized")
+        
+        # Initialize ImageVectorDB (downloads CLIP model if needed)
+        vector_db = get_vector_db()
+        logger.info("ImageVectorDB initialized")
+        
+        logger.info("Model warmup completed successfully")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Model warmup failed: {e}")
+        return False
+
 def configure_routes(app):
     """Configure Flask routes."""
-    meme_engine = MemeService()
     
     @app.route('/')
     def index():
@@ -84,6 +125,9 @@ def configure_routes(app):
             # Get caption from request or generate one
             caption = request.form.get('caption')
             caption_list = caption.split('|') if caption else []
+            
+            # Use global meme service instance
+            meme_engine = get_meme_service()
             
             # First generate meme to a temporary path
             temp_output = meme_engine.generate_meme(image_path, caption_list)
@@ -176,9 +220,9 @@ def configure_routes(app):
             else:
                 return jsonify({'error': 'No image provided'}), 400
             
-            # Initialize services
-            meme_service = MemeService()
-            vector_db = ImageVectorDB()
+            # Initialize services using global instances
+            meme_service = get_meme_service()
+            vector_db = get_vector_db()
             
             # First, clean any text from the image with confidence > 0.5
             logger.info(f"Cleaning text from image: {local_image_path}")

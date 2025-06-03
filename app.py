@@ -3,7 +3,7 @@ Flask application entrypoint for the meme generation API.
 """
 import os
 from flask import Flask
-from bot.routes import configure_routes
+from bot.routes import configure_routes, warmup_models
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -14,6 +14,13 @@ app = Flask(__name__)
 
 # Configure routes for meme generation API
 configure_routes(app)
+
+# Warmup models during startup (important for production deployment)
+print("Warming up models...")
+if warmup_models():
+    print("Model warmup completed successfully")
+else:
+    print("Warning: Model warmup failed - first requests may be slower")
 
 if __name__ == "__main__":
     # Get port from environment or use default
