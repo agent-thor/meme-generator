@@ -1,0 +1,29 @@
+2025-06-03 23:47:19,221 - ERROR - Failed to start bot: Missing Twitter API credentials in environment variables
+2025-06-03 23:49:37,998 - INFO - Successfully authenticated as @ForgexMemezap
+2025-06-03 23:49:37,998 - INFO - Starting Twitter Meme Bot...
+2025-06-03 23:49:37,998 - INFO - MemeZap API URL: http://127.0.0.1:5003/api/smart_generate
+2025-06-03 23:49:37,998 - ERROR - Error checking mentions: 'Client' object has no attribute 'get_mentions'
+2025-06-03 23:49:59,172 - INFO - Bot stopped by user
+2025-06-03 23:52:32,403 - INFO - Successfully authenticated as @ForgexMemezap
+2025-06-03 23:52:32,911 - INFO - Bot user ID: 1919832103056728064
+2025-06-03 23:52:32,911 - INFO - Starting Twitter Meme Bot...
+2025-06-03 23:52:32,911 - INFO - MemeZap API URL: http://127.0.0.1:5003/api/smart_generate
+2025-06-03 23:52:33,263 - INFO - No mentions found
+2025-06-03 23:53:33,810 - WARNING - Rate limit exceeded. Sleeping for 841 seconds.
+2025-06-03 23:54:01,233 - INFO - Bot stopped by user
+2025-06-04 00:03:30,694 - INFO - 🤖 MemeZap Bot authenticated as @ForgexMemezap
+2025-06-04 00:03:31,498 - INFO - 🎭 Bot Username: @ForgexMemezap
+2025-06-04 00:03:31,498 - INFO - 📝 Anyone can mention @ForgexMemezap to generate memes!
+2025-06-04 00:03:31,498 - INFO - 🚀 Starting MemeZap Bot...
+2025-06-04 00:03:31,498 - INFO - 🎯 Listening for mentions of @forgexmemezap
+2025-06-04 00:03:31,498 - INFO - 🔗 MemeZap API: http://127.0.0.1:5003/api/smart_generate
+2025-06-04 00:03:31,498 - INFO - ⏱️ Check interval: 180 seconds
+2025-06-04 00:03:31,498 - INFO - 👀 Checking for new mentions...
+2025-06-04 00:03:31,857 - ERROR - API error: 403 Forbidden
+453 - You currently have access to a subset of X API V2 endpoints and limited v1.1 endpoints (e.g. media post, oauth) only. If you need access to this endpoint, you may need a different access level. You can learn more here: https://developer.x.com/en/portal/product
+2025-06-04 00:03:31,857 - INFO - 😴 Sleeping for 180 seconds...
+2025-06-04 00:06:31,865 - INFO - 👀 Checking for new mentions...
+2025-06-04 00:06:32,213 - ERROR - API error: 403 Forbidden
+453 - You currently have access to a subset of X API V2 endpoints and limited v1.1 endpoints (e.g. media post, oauth) only. If you need access to this endpoint, you may need a different access level. You can learn more here: https://developer.x.com/en/portal/product
+2025-06-04 00:06:32,213 - INFO - 😴 Sleeping for 180 seconds...
+2025-06-04 00:06:42,560 - INFO - 🛑 Bot stopped by user

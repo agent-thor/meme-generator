@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Web application routes for meme generation.
 """
@@ -12,6 +13,7 @@ import yaml
 import sys
 from tempfile import NamedTemporaryFile
 import requests
+from bot.twitter_notif import notify_meme_generated
 
 # Add parent directory to sys.path to allow importing from other modules
 sys.path.append(str(Path(__file__).parent.parent))
@@ -142,6 +144,34 @@ def configure_routes(app):
             shutil.copy2(temp_output, output_path)
             
             logger.info(f"Saved meme response to {output_path}")
+            
+            # Post Twitter notification asynchronously (non-blocking)
+            try:
+                import threading
+                original_caption = caption if caption else "custom meme"
+                
+                def post_twitter_async():
+                    try:
+                        twitter_success = notify_meme_generated(
+                            input_text=original_caption,
+                            meme_image_path=output_path,
+                            from_template=False,
+                            similarity_score=0
+                        )
+                        if twitter_success:
+                            logger.info("✅ Successfully posted promotional tweet about generated meme")
+                        else:
+                            logger.info("ℹ️ Twitter notification was not posted (disabled or failed)")
+                    except Exception as twitter_error:
+                        logger.error(f"Error posting Twitter notification: {twitter_error}")
+                
+                # Start Twitter posting in background thread
+                twitter_thread = threading.Thread(target=post_twitter_async, daemon=True)
+                twitter_thread.start()
+                logger.info("🚀 Started Twitter notification in background")
+                
+            except Exception as e:
+                logger.error(f"Error starting Twitter notification thread: {e}")
             
             # Return the generated meme
             return send_file(
@@ -465,11 +495,67 @@ def configure_routes(app):
                 # Print debug info
                 print(f"DEBUG - Returning template info in JSON response: from_template={from_template}, similarity_score={similarity_score}")
                 
+                # Post Twitter notification asynchronously (non-blocking)
+                try:
+                    import threading
+                    original_caption = caption if caption else "custom meme"
+                    
+                    def post_twitter_async():
+                        try:
+                            twitter_success = notify_meme_generated(
+                                input_text=original_caption,
+                                meme_image_path=output_path,
+                                from_template=from_template,
+                                similarity_score=similarity_score
+                            )
+                            if twitter_success:
+                                logger.info("✅ Successfully posted promotional tweet about generated meme")
+                            else:
+                                logger.info("ℹ️ Twitter notification was not posted (disabled or failed)")
+                        except Exception as twitter_error:
+                            logger.error(f"Error posting Twitter notification: {twitter_error}")
+                    
+                    # Start Twitter posting in background thread
+                    twitter_thread = threading.Thread(target=post_twitter_async, daemon=True)
+                    twitter_thread.start()
+                    logger.info("🚀 Started Twitter notification in background")
+                    
+                except Exception as e:
+                    logger.error(f"Error starting Twitter notification thread: {e}")
+                
                 return jsonify({
                     'meme_url': meme_url, 
                     'from_template': from_template,
                     'similarity_score': similarity_score
                 })
+            
+            # For file download requests, also post Twitter notification asynchronously
+            try:
+                import threading
+                original_caption = caption if caption else "custom meme"
+                
+                def post_twitter_async():
+                    try:
+                        twitter_success = notify_meme_generated(
+                            input_text=original_caption,
+                            meme_image_path=output_path,
+                            from_template=from_template,
+                            similarity_score=similarity_score
+                        )
+                        if twitter_success:
+                            logger.info("✅ Successfully posted promotional tweet about generated meme")
+                        else:
+                            logger.info("ℹ️ Twitter notification was not posted (disabled or failed)")
+                    except Exception as twitter_error:
+                        logger.error(f"Error posting Twitter notification: {twitter_error}")
+                
+                # Start Twitter posting in background thread
+                twitter_thread = threading.Thread(target=post_twitter_async, daemon=True)
+                twitter_thread.start()
+                logger.info("🚀 Started Twitter notification in background")
+                
+            except Exception as e:
+                logger.error(f"Error starting Twitter notification thread: {e}")
             
             # Otherwise return the file directly
             return send_file(
